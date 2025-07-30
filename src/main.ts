@@ -1,4 +1,4 @@
-import { App, Plugin, PluginManifest, TFile, MarkdownView, Notice, setIcon } from "obsidian";
+import { App, Plugin, PluginManifest, TFile, MarkdownView, Notice, FuzzySuggestModal, setIcon } from "obsidian";
 
 export default class SequentialNoteNavigator extends Plugin {
 	async onload() {
@@ -10,6 +10,27 @@ export default class SequentialNoteNavigator extends Plugin {
 
 		// run on startup
 		this.addNavigationButtons();
+
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (file) => {
+				const activeFile = this.app.workspace.getActiveFile();
+				if (file.path === activeFile?.path) {
+					this.addNavigationButtons();
+				}
+			})
+		);
+
+		this.addCommand({
+			id: "set-prev-note",
+			name: "Add link to previous note",
+			callback: () => this.insertLink("prev"),
+		});
+
+		this.addCommand({
+			id: "set-next-note",
+			name: "Add link to next note",
+			callback: () => this.insertLink("next"),
+		});
 	}
 
 	onunload() {
@@ -77,6 +98,78 @@ export default class SequentialNoteNavigator extends Plugin {
 		}
 
 		return btn;
+	}
+
+	async insertLink(key: "prev" | "next") {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const file = view?.file;
+		if (!file) {
+			new Notice("No active note.");
+			return;
+		}
+
+		const files = this.app.vault.getMarkdownFiles();
+
+		const modal = new class extends FuzzySuggestModal<TFile> {
+			plugin;
+
+			constructor(plugin: SequentialNoteNavigator) {
+				super(plugin.app);
+				this.plugin = plugin;
+			}
+
+			getItems(): TFile[] {
+				return files;
+			}
+
+			getItemText(item: TFile): string {
+				return item.basename;
+			}
+
+			onChooseItem(item: TFile) {
+				const link = `"[[${item.basename}]]"`;
+				this.plugin.updateFrontmatterLink(file, key, link);
+			}
+		}(this);
+
+		modal.open();
+	}
+
+	async updateFrontmatterLink(file: TFile, key: "prev" | "next", value: string) {
+		const content = await this.app.vault.read(file);
+		const lines = content.split("\n");
+
+		if (lines[0] !== "---") {
+			// no frontmatter — insert a new block
+			const newFrontmatter = `---\n${key}: ${value}\n---\n`;
+			await this.app.vault.modify(file, newFrontmatter + content);
+			return;
+		}
+
+		// find the end of the frontmatter
+		let i = 1;
+		while (i < lines.length && lines[i] !== "---") i++;
+		if (i >= lines.length) {
+			new Notice("Invalid frontmatter format.");
+			return;
+		}
+
+		// insert the link
+		let found = false;
+		for (let j = 1; j < i; j++) {
+			if (lines[j].startsWith(`${key}:`)) {
+				lines[j] = `${key}: ${value}`;
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			lines.splice(i, 0, `${key}: ${value}`);
+		}
+
+		// write the frontmatter back to the file
+		const newContent = [...lines, ...content.split("\n").slice(i + 1)].join("\n");
+		await this.app.vault.modify(file, newContent);
 	}
 }
 
