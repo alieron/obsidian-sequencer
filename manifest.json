@@ -1,10 +1,10 @@
 {
 	"id": "sequencer",
 	"name": "Sequencer",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"minAppVersion": "0.15.0",
-	"description": "Adds ability to arrange links between notes in a sequence using Previous and Next to navigate between them",
-	"author": "Alieron",
+	"description": "Obsidian plugin for organising notes in a sequence and navigating through the sequence.",
+	"author": "alieron",
 	"authorUrl": "",
 	"fundingUrl": "",
 	"isDesktopOnly": false
