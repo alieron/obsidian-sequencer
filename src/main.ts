@@ -33,12 +33,10 @@ export default class SequentialNoteNavigator extends Plugin {
 		const frontmatter = this.getFrontmatter(file);
 		if (!frontmatter) return;
 
-		if (frontmatter.next) {
+		if (frontmatter.next || frontmatter.prev) {
 			const nextBtn = this.createNavButton("next", frontmatter.next);
 			actionsEl.insertBefore(nextBtn, actionsEl.firstChild);
-		}
 
-		if (frontmatter.prev) {
 			const prevBtn = this.createNavButton("prev", frontmatter.prev);
 			actionsEl.insertBefore(prevBtn, actionsEl.firstChild);
 		}
@@ -50,29 +48,33 @@ export default class SequentialNoteNavigator extends Plugin {
 		return cache?.frontmatter ?? null;
 	}
 
-	createNavButton(label: "prev" | "next", target: string): HTMLButtonElement {
+	createNavButton(label: "prev" | "next", target: string | undefined): HTMLButtonElement {
 		const btn = createEl("button");
+		btn.disabled = !target;
 		btn.classList.add("clickable-icon", "seq-nav-button");
 		btn.style.padding = "4px";
 
 		const iconName = label === "prev" ? "arrow-big-left" : "arrow-big-right";
 		setIcon(btn, iconName);
 
-		btn.onclick = async () => {
-			const cleanTarget = target.replace(/\[\[|\]\]/g, "");
-			const resolved = this.app.metadataCache.getFirstLinkpathDest(cleanTarget, "");
-			if (!resolved) {
-				new Notice(`Note not found: ${target}`);
-				return;
-			}
+		if (target) {
+			btn.ariaLabel = label === "prev" ? "Previous Note" : "Next Note";
+			btn.onclick = async () => {
+				const cleanTarget = target.replace(/\[\[|\]\]/g, "");
+				const resolved = this.app.metadataCache.getFirstLinkpathDest(cleanTarget, "");
+				if (!resolved) {
+					new Notice(`Note not found: ${target}`);
+					return;
+				}
 
-			const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (mdView) {
-				await mdView.leaf.openFile(resolved);
-			} else {
-				new Notice("No active markdown view.");
-			}
-		};
+				const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (mdView) {
+					await mdView.leaf.openFile(resolved);
+				} else {
+					new Notice("No active markdown view.");
+				}
+			};
+		}
 
 		return btn;
 	}
