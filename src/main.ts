@@ -11,6 +11,15 @@ export default class SequentialNoteNavigator extends Plugin {
 		// run on startup
 		this.addNavigationButtons();
 
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (file) => {
+				const activeFile = this.app.workspace.getActiveFile();
+				if (file.path === activeFile?.path) {
+					this.addNavigationButtons();
+				}
+			})
+		);
+
 		this.addCommand({
 			id: "set-prev-note",
 			name: "Add link to previous note",
