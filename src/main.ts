@@ -168,7 +168,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		}
 
 		// write the frontmatter back to the file
-		const newContent = [...lines, ...content.split("\n").slice(i + 1)].join("\n");
+		const newContent = lines.join("\n");
 		await this.app.vault.modify(file, newContent);
 	}
 }
