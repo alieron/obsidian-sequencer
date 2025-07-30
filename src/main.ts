@@ -79,8 +79,8 @@ export default class SequentialNoteNavigator extends Plugin {
 		setIcon(btn, iconName);
 
 		if (target) {
-			btn.ariaLabel = label === "prev" ? "Previous Note" : "Next Note";
-			btn.onclick = async () => {
+			btn.ariaLabel = `${label === "prev" ? "Previous Note" : "Next Note"}\nClick to open\nCtrl+Click to open to the right` 
+			btn.onclick = async (event: MouseEvent) => {
 				const cleanTarget = target.replace(/\[\[|\]\]/g, "");
 				const resolved = this.app.metadataCache.getFirstLinkpathDest(cleanTarget, "");
 				if (!resolved) {
@@ -88,11 +88,11 @@ export default class SequentialNoteNavigator extends Plugin {
 					return;
 				}
 
-				const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (mdView) {
-					await mdView.leaf.openFile(resolved);
-				} else {
-					new Notice("No active markdown view.");
+				const openNewTab = event.ctrlKey || event.metaKey;
+
+				const leaf = openNewTab ? this.app.workspace.getLeaf(true) : this.app.workspace.getActiveViewOfType(MarkdownView)?.leaf;
+				if (leaf) {
+					await leaf.openFile(resolved);
 				}
 			};
 		}
