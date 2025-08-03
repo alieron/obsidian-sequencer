@@ -1,4 +1,5 @@
 import { App, Plugin, PluginManifest, TFile, MarkdownView, Notice, FuzzySuggestModal, setIcon } from "obsidian";
+import { LinkToFileModal } from "./modal";
 
 export default class SequentialNoteNavigator extends Plugin {
 	async onload() {
@@ -79,7 +80,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		setIcon(btn, iconName);
 
 		if (target) {
-			btn.ariaLabel = `${label === "prev" ? "Previous Note" : "Next Note"}\nClick to open\nCtrl+Click to open to the right` 
+			btn.ariaLabel = `${label === "prev" ? "Previous Note" : "Next Note"}\nClick to open\nCtrl+Click to open to the right`
 			btn.onclick = async (event: MouseEvent) => {
 				const cleanTarget = target.replace(/\[\[|\]\]/g, "");
 				const resolved = this.app.metadataCache.getFirstLinkpathDest(cleanTarget, "");
@@ -108,29 +109,19 @@ export default class SequentialNoteNavigator extends Plugin {
 			return;
 		}
 
-		const files = this.app.vault.getMarkdownFiles();
+		async function insertLink(file: TFile, key: "prev" | "next", link: string) {
+			const content = await this.app.vault.read(file);
+			const updated = content.replace(
+				/^---\n([\s\S]*?)\n---/,
+				(_: string, yaml: string) => {
+					const lines = yaml.split("\n").filter((line: string) => !line.startsWith(`${key}:`)); // replace old link if any
+					return `---\n${lines.join("\n")}\n${key}: ${link}\n---`;
+				}
+			);
+			await this.app.vault.modify(file, updated);
+		}
 
-		const modal = new class extends FuzzySuggestModal<TFile> {
-			plugin;
-
-			constructor(plugin: SequentialNoteNavigator) {
-				super(plugin.app);
-				this.plugin = plugin;
-			}
-
-			getItems(): TFile[] {
-				return files;
-			}
-
-			getItemText(item: TFile): string {
-				return item.basename;
-			}
-
-			onChooseItem(item: TFile) {
-				const link = `"[[${item.basename}]]"`;
-				this.plugin.updateFrontmatterLink(file, key, link);
-			}
-		}(this);
+		const modal = new LinkToFileModal(this.app, file, key, insertLink);
 
 		modal.open();
 	}
