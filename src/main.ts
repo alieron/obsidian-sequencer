@@ -105,7 +105,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const file = view?.file;
 		if (!file) {
-			new Notice("No active note.");
+			new Notice("Run this command with a note open.");
 			return;
 		}
 
