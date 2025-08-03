@@ -1,4 +1,4 @@
-import { App, TFile, FuzzySuggestModal, FuzzyMatch, normalizePath } from "obsidian";
+import { App, TFile, FuzzySuggestModal, normalizePath } from "obsidian";
 
 type Suggestion = {
 	type: "unresolved";
@@ -75,7 +75,7 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 		if (item.type === "file" && item.file) {
 			targetFile = item.file;
 		} else {
-			const path = normalizePath(item.linktext + ".md");
+			const path = normalizePath(`${this.currentFile.parent?.path}/${item.linktext}.md`);
 			targetFile = await this.app.vault.create(path, "");
 		}
 
