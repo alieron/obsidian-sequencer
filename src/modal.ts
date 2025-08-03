@@ -16,7 +16,6 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 		app: App,
 		private currentFile: TFile,
 		private direction: "prev" | "next",
-		private insertLink: (file: TFile, direction: "prev" | "next", link: string) => Promise<void>
 	) {
 		super(app);
 	}
@@ -79,9 +78,21 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 			targetFile = await this.app.vault.create(path, "");
 		}
 
-		await this.insertLink(this.currentFile, this.direction, link);
+		await this.insertLink(link);
 		const leaf = this.app.workspace.getLeaf(openNewTab);
 		await leaf.openFile(targetFile);
 	}
-}
+
+	async insertLink(link: string): Promise<void> {
+		this.app.vault.process(this.currentFile, (content) => {
+			const updated = content.replace(
+				/^---\n([\s\S]*?)\n---/,
+				(_: string, yaml: string) => {
+					const lines = yaml.split("\n").filter((line: string) => !line.startsWith(`${this.direction}:`)); // replace old link if any
+					return `---\n${lines.join("\n")}\n${this.direction}: ${link}\n---`;
+				}
+			);
+			return updated;
+		});
+	}
 

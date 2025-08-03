@@ -109,19 +109,8 @@ export default class SequentialNoteNavigator extends Plugin {
 			return;
 		}
 
-		async function insertLink(file: TFile, key: "prev" | "next", link: string) {
-			const content = await this.app.vault.read(file);
-			const updated = content.replace(
-				/^---\n([\s\S]*?)\n---/,
-				(_: string, yaml: string) => {
-					const lines = yaml.split("\n").filter((line: string) => !line.startsWith(`${key}:`)); // replace old link if any
-					return `---\n${lines.join("\n")}\n${key}: ${link}\n---`;
-				}
-			);
-			await this.app.vault.modify(file, updated);
-		}
 
-		const modal = new LinkToFileModal(this.app, file, key, insertLink);
+		const modal = new LinkToFileModal(this.app, file, key);
 
 		modal.open();
 	}
