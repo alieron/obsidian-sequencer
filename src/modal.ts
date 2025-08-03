@@ -52,11 +52,13 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 	}
 
 	getItems(): Suggestion[] {
-		const out: Suggestion[] = [{
-			type: "unresolved",
-			linktext: this.inputEl.value
-		}]
-		out.push(...this.suggestions);
+		const out: Suggestion[] = [...this.suggestions];
+		if (this.inputEl.value && !out.some(s => s.linktext === this.inputEl.value)) {
+			out.push({
+				type: "unresolved",
+				linktext: this.inputEl.value
+			});
+		}
 		return out;
 	}
 
