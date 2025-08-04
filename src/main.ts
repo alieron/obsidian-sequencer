@@ -1,9 +1,16 @@
-import { App, Plugin, PluginManifest, TFile, MarkdownView, Notice, FuzzySuggestModal, setIcon } from "obsidian";
+import { Plugin, TFile, MarkdownView, Notice, setIcon } from "obsidian";
 import { LinkToFileModal } from "./modal";
+import { DEFAULT_SETTINGS, SequencerSettings, SequencerSettingTab } from "./settings";
 
 export default class SequentialNoteNavigator extends Plugin {
+	settings: SequencerSettings;
+
 	async onload() {
 		console.log("Loading Obsidian Sequencer plugin...");
+
+		await this.loadSettings();
+
+		this.addSettingTab(new SequencerSettingTab(this.app, this));
 
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", () => this.addNavigationButtons())
@@ -32,6 +39,14 @@ export default class SequentialNoteNavigator extends Plugin {
 			name: "Add link to next note",
 			callback: () => this.insertLink("next"),
 		});
+	}
+
+	async loadSettings() {
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+	}
+
+	async saveSettings() {
+		await this.saveData(this.settings);
 	}
 
 	onunload() {
