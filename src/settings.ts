@@ -23,5 +23,29 @@ export class SequencerSettingTab extends PluginSettingTab {
 		let { containerEl } = this;
 
 		containerEl.empty();
+
+		new Setting(containerEl)
+			.setName('Create Reciprocal Links')
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.reciprocalLinks)
+					.onChange(async (value) => {
+						this.plugin.settings.reciprocalLinks = value;
+						await this.plugin.saveSettings();
+						this.display()
+					})
+			);
+		new Setting(containerEl)
+			.setName('Show Sibling Notes Only')
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.onlySiblingFiles)
+					.onChange(async (value) => {
+						this.plugin.settings.onlySiblingFiles = value;
+						await this.plugin.saveSettings();
+						this.display()
+					})
+			);
+
 	}
 }
