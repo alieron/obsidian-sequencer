@@ -125,7 +125,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		}
 
 
-		const modal = new LinkToFileModal(this.app, file, key);
+		const modal = new LinkToFileModal(this.app, this.settings, file, key);
 
 		modal.open();
 	}

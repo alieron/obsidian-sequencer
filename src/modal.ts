@@ -1,4 +1,5 @@
 import { App, TFile, FuzzySuggestModal, normalizePath } from "obsidian";
+import { SequencerSettings } from "./settings";
 
 type Suggestion = {
 	type: "unresolved";
@@ -14,6 +15,7 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 
 	constructor(
 		app: App,
+		private settings: SequencerSettings,
 		private currentFile: TFile,
 		private direction: "prev" | "next",
 	) {
