@@ -81,7 +81,11 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 
 		await this.insertLink(this.currentFile, this.toLink(item.linktext), this.direction);
 		const leaf = this.app.workspace.getLeaf(openNewTab);
-		await this.insertLink(targetFile, this.toLink(this.currentFile.basename), this.direction === "prev" ? "next" : "prev"); 
+
+		if (this.settings.reciprocalLinks) {
+			await this.insertLink(targetFile, this.toLink(this.currentFile.basename), this.direction === "prev" ? "next" : "prev");
+		}
+
 		await leaf.openFile(targetFile);
 	}
 
