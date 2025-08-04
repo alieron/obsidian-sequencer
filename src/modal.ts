@@ -67,7 +67,6 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 
 	async onChooseItem(item: Suggestion, evt: MouseEvent | KeyboardEvent) {
 		const openNewTab = (evt as MouseEvent).metaKey || (evt as MouseEvent).ctrlKey;
-		const link = `"[[${item.linktext}]]"`;
 
 		let targetFile: TFile;
 
@@ -78,9 +77,14 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 			targetFile = await this.app.vault.create(path, "");
 		}
 
-		await this.insertLink(this.currentFile, link, this.direction);
+		await this.insertLink(this.currentFile, this.toLink(item.linktext), this.direction);
 		const leaf = this.app.workspace.getLeaf(openNewTab);
+		await this.insertLink(targetFile, this.toLink(this.currentFile.basename), this.direction === "prev" ? "next" : "prev"); 
 		await leaf.openFile(targetFile);
+	}
+
+	toLink(file: string) {
+		return `"[[${file}]]"`;
 	}
 
 	async insertLink(file: TFile, link: string, key: "prev" | "next"): Promise<void> {
