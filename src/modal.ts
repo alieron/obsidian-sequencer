@@ -78,25 +78,25 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 			targetFile = await this.app.vault.create(path, "");
 		}
 
-		await this.insertLink(link);
+		await this.insertLink(this.currentFile, link, this.direction);
 		const leaf = this.app.workspace.getLeaf(openNewTab);
 		await leaf.openFile(targetFile);
 	}
 
-	async insertLink(link: string): Promise<void> {
-		this.app.vault.process(this.currentFile, (content) => {
+	async insertLink(file: TFile, link: string, key: "prev" | "next"): Promise<void> {
+		this.app.vault.process(file, (content) => {
 			const match = content.match(/^---\n([\s\S]*?)\n---/);
 			let updated: string;
 			if (match) {
 				updated = content.replace(
 					/^---\n([\s\S]*?)\n---/,
 					(_: string, yaml: string) => {
-						const lines = yaml.split("\n").filter((line: string) => !line.startsWith(`${this.direction}:`)); // replace old link if any
-						return `---\n${lines.join("\n")}\n${this.direction}: ${link}\n---`;
+						const lines = yaml.split("\n").filter((line: string) => !line.startsWith(`${key}:`)); // replace old link if any
+						return `---\n${lines.join("\n")}\n${key}: ${link}\n---`;
 					}
 				);
 			} else {
-				updated = `---\n${this.direction}: ${link}\n---` + content;
+				updated = `---\n${key}: ${link}\n---` + content;
 			}
 			return updated;
 		});
