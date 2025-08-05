@@ -1,7 +1,7 @@
 {
 	"id": "sequencer",
 	"name": "Sequencer",
-	"version": "0.2.1",
+	"version": "0.3.0",
 	"minAppVersion": "0.15.0",
 	"description": "Obsidian plugin for organising notes in a sequence and navigating through the sequence.",
 	"author": "alieron",
