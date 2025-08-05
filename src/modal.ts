@@ -71,7 +71,6 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 
 	async onChooseItem(item: Suggestion, evt: MouseEvent | KeyboardEvent) {
 		const openNewTab = (evt as MouseEvent).metaKey || (evt as MouseEvent).ctrlKey;
-		const link = `"[[${item.linktext}]]"`;
 
 		let targetFile: TFile;
 
@@ -82,25 +81,34 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 			targetFile = await this.app.vault.create(path, "");
 		}
 
-		await this.insertLink(link);
+		await this.insertLink(this.currentFile, this.toLink(item.linktext), this.direction);
 		const leaf = this.app.workspace.getLeaf(openNewTab);
+
+		if (this.settings.reciprocalLinks) {
+			await this.insertLink(targetFile, this.toLink(this.currentFile.basename), this.direction === "prev" ? "next" : "prev");
+		}
+
 		await leaf.openFile(targetFile);
 	}
 
-	async insertLink(link: string): Promise<void> {
-		this.app.vault.process(this.currentFile, (content) => {
+	toLink(file: string) {
+		return `"[[${file}]]"`;
+	}
+
+	async insertLink(file: TFile, link: string, key: "prev" | "next"): Promise<void> {
+		this.app.vault.process(file, (content) => {
 			const match = content.match(/^---\n([\s\S]*?)\n---/);
 			let updated: string;
 			if (match) {
 				updated = content.replace(
 					/^---\n([\s\S]*?)\n---/,
 					(_: string, yaml: string) => {
-						const lines = yaml.split("\n").filter((line: string) => !line.startsWith(`${this.direction}:`)); // replace old link if any
-						return `---\n${lines.join("\n")}\n${this.direction}: ${link}\n---`;
+						const lines = yaml.split("\n").filter((line: string) => !line.startsWith(`${key}:`)); // replace old link if any
+						return `---\n${lines.join("\n")}\n${key}: ${link}\n---`;
 					}
 				);
 			} else {
-				updated = `---\n${this.direction}: ${link}\n---` + content;
+				updated = `---\n${key}: ${link}\n---` + content;
 			}
 			return updated;
 		});
