@@ -25,11 +25,13 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 	async onOpen() {
 		// Preload suggestions so getItems is sync
 		const files = this.app.vault.getMarkdownFiles();
-		const fileSuggestions: Suggestion[] = files.map((file) => ({
-			type: "file",
-			file,
-			linktext: file.basename,
-		}));
+		const fileSuggestions: Suggestion[] = files
+			.filter((file) => !this.settings.onlySiblingFiles || file.parent?.path === this.currentFile.parent?.path)
+			.map((file) => ({
+				type: "file",
+				file,
+				linktext: file.basename,
+			}));
 
 		// Get unresolved links from metadata cache
 		const unresolvedLinks = new Set<string>();
