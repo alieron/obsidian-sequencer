@@ -152,7 +152,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		// insert the link
 		let found = false;
 		for (let j = 1; j < i; j++) {
-			if (lines[j].startsWith(`${key}:`)) {
+			if ((lines[j] as string).startsWith(`${key}:`)) {
 				lines[j] = `${key}: ${value}`;
 				found = true;
 				break;
