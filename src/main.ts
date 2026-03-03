@@ -116,7 +116,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		return btn;
 	}
 
-	async insertLink(key: "prev" | "next") {
+	insertLink(key: "prev" | "next") {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const file = view?.file;
 		if (!file) {

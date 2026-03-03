@@ -51,7 +51,7 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 		}));
 
 		this.suggestions = [...fileSuggestions, ...unresolvedSuggestions];
-		void super.onOpen();
+		await super.onOpen();
 	}
 
 	getItems(): Suggestion[] {
