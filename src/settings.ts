@@ -25,7 +25,7 @@ export class SequencerSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Create Reciprocal Links')
+			.setName('Create reciprocal links')
 			.setDesc('Automatically creates the corresponding link back to your current note, when adding a sequential link to another note.')
 			.addToggle((toggle) =>
 				toggle
@@ -37,7 +37,7 @@ export class SequencerSettingTab extends PluginSettingTab {
 					})
 			);
 		new Setting(containerEl)
-			.setName('Show Sibling Notes Only')
+			.setName('Only show sibling notes')
 			.setDesc('Only suggest notes in the same folder when adding sequential links.')
 			.addToggle((toggle) =>
 				toggle

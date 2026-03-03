@@ -51,7 +51,7 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 		}));
 
 		this.suggestions = [...fileSuggestions, ...unresolvedSuggestions];
-		super.onOpen();
+		void super.onOpen();
 	}
 
 	getItems(): Suggestion[] {
@@ -69,26 +69,28 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 		return item.linktext;
 	}
 
-	async onChooseItem(item: Suggestion, evt: MouseEvent | KeyboardEvent) {
-		const openNewTab = (evt as MouseEvent).metaKey || (evt as MouseEvent).ctrlKey;
+	onChooseItem(item: Suggestion, evt: MouseEvent | KeyboardEvent): void {
+		void (async () => {
+			const openNewTab = (evt as MouseEvent).metaKey || (evt as MouseEvent).ctrlKey;
 
-		let targetFile: TFile;
+			let targetFile: TFile;
 
-		if (item.type === "file" && item.file) {
-			targetFile = item.file;
-		} else {
-			const path = normalizePath(`${this.currentFile.parent?.path}/${item.linktext}.md`);
-			targetFile = await this.app.vault.create(path, "");
-		}
+			if (item.type === "file" && item.file) {
+				targetFile = item.file;
+			} else {
+				const path = normalizePath(`${this.currentFile.parent?.path}/${item.linktext}.md`);
+				targetFile = await this.app.vault.create(path, "");
+			}
 
-		await this.insertLink(this.currentFile, this.toLink(item.linktext), this.direction);
-		const leaf = this.app.workspace.getLeaf(openNewTab);
+			await this.insertLink(this.currentFile, this.toLink(item.linktext), this.direction);
+			const leaf = this.app.workspace.getLeaf(openNewTab);
 
-		if (this.settings.reciprocalLinks) {
-			await this.insertLink(targetFile, this.toLink(this.currentFile.basename), this.direction === "prev" ? "next" : "prev");
-		}
+			if (this.settings.reciprocalLinks) {
+				await this.insertLink(targetFile, this.toLink(this.currentFile.basename), this.direction === "prev" ? "next" : "prev");
+			}
 
-		await leaf.openFile(targetFile);
+			await leaf.openFile(targetFile);
+		})();
 	}
 
 	toLink(file: string) {
@@ -96,7 +98,7 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 	}
 
 	async insertLink(file: TFile, link: string, key: "prev" | "next"): Promise<void> {
-		this.app.vault.process(file, (content) => {
+		await this.app.vault.process(file, (content) => {
 			const match = content.match(/^---\n([\s\S]*?)\n---/);
 			let updated: string;
 			if (match) {
