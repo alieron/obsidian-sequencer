@@ -1,5 +1,5 @@
-import { Plugin, TFile, MarkdownView, Notice, setIcon, FrontMatterCache } from "obsidian";
-import { LinkToFileModal } from "./modal";
+import { FrontMatterCache, MarkdownView, Notice, Plugin, setIcon, TFile } from "obsidian";
+import { InsertSequenceNoteModal, LinkToFileModal } from "./modal";
 import { DEFAULT_SETTINGS, SequencerSettings, SequencerSettingTab } from "./settings";
 
 export default class SequentialNoteNavigator extends Plugin {
@@ -39,6 +39,23 @@ export default class SequentialNoteNavigator extends Plugin {
 			name: "Add link to next note",
 			callback: () => this.insertLink("next"),
 		});
+
+		this.addCommand({
+			id: "insert-note-before-current",
+			name: "Insert note before current note",
+			callback: () => {
+				void this.insertNoteAroundCurrent("before");
+			},
+		});
+
+		this.addCommand({
+			id: "insert-note-after-current",
+			name: "Insert note after current note",
+			callback: () => {
+				void this.insertNoteAroundCurrent("after");
+			},
+		});
+
 	}
 
 	async loadSettings() {
@@ -130,11 +147,86 @@ export default class SequentialNoteNavigator extends Plugin {
 		modal.open();
 	}
 
-	async updateFrontmatterLink(file: TFile, key: "prev" | "next", value: string) {
+	resolveSequenceLink(file: TFile, key: "prev" | "next"): TFile | null {
+		const frontmatter = this.getFrontmatter(file);
+		const rawTarget: unknown = frontmatter?.[key];
+		if (typeof rawTarget !== "string") return null;
+
+		const cleanTarget = this.cleanLinkTarget(rawTarget);
+
+		return this.app.metadataCache.getFirstLinkpathDest(cleanTarget, file.path);
+	}
+
+	cleanLinkTarget(target: string): string {
+		return target.replace(/^\s*['"]?/, "")
+			.replace(/['"]?\s*$/, "")
+			.replace(/^\[\[/, "")
+			.replace(/\]\]$/, "");
+	}
+
+	getYamlLink(sourceFile: TFile, targetFile: TFile): string {
+		const linktext = this.app.metadataCache.fileToLinktext(targetFile, sourceFile.path);
+		return `"[[${linktext}]]"`;
+	}
+
+	insertNoteAroundCurrent(position: "before" | "after") {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const currentFile = view?.file;
+		if (!currentFile) {
+			new Notice("Run this command with a note open.");
+			return;
+		}
+
+		const modal = new InsertSequenceNoteModal(
+			this.app,
+			this.settings,
+			currentFile,
+			position,
+			async (targetFile) => {
+				await this.insertSelectedNoteAroundCurrent(currentFile, targetFile, position);
+				await view.leaf.openFile(targetFile);
+			},
+		);
+
+		modal.open();
+	}
+
+	async insertSelectedNoteAroundCurrent(currentFile: TFile, targetFile: TFile, position: "before" | "after") {
+		if (targetFile.path === currentFile.path) {
+			new Notice("Choose a different note to insert into the sequence.");
+			return;
+		}
+
+		const previousFile = this.resolveSequenceLink(currentFile, "prev");
+		const nextFile = this.resolveSequenceLink(currentFile, "next");
+
+		if (position === "before") {
+			await this.updateFrontmatterLink(targetFile, "prev", previousFile ? this.getYamlLink(targetFile, previousFile) : null);
+			await this.updateFrontmatterLink(targetFile, "next", this.getYamlLink(targetFile, currentFile));
+			await this.updateFrontmatterLink(currentFile, "prev", this.getYamlLink(currentFile, targetFile));
+			if (previousFile) {
+				await this.updateFrontmatterLink(previousFile, "next", this.getYamlLink(previousFile, targetFile));
+			}
+		} else {
+			await this.updateFrontmatterLink(targetFile, "prev", this.getYamlLink(targetFile, currentFile));
+			await this.updateFrontmatterLink(targetFile, "next", nextFile ? this.getYamlLink(targetFile, nextFile) : null);
+			await this.updateFrontmatterLink(currentFile, "next", this.getYamlLink(currentFile, targetFile));
+			if (nextFile) {
+				await this.updateFrontmatterLink(nextFile, "prev", this.getYamlLink(nextFile, targetFile));
+			}
+		}
+
+		new Notice(`Inserted ${targetFile.basename} ${position} ${currentFile.basename}.`);
+	}
+
+	async updateFrontmatterLink(file: TFile, key: "prev" | "next", value: string | null) {
+		if (!this.app.vault.getFileByPath(file.path)) return;
+
 		const content = await this.app.vault.read(file);
 		const lines = content.split("\n");
 
 		if (lines[0] !== "---") {
+			if (value === null) return;
 			// no frontmatter — insert a new block
 			const newFrontmatter = `---\n${key}: ${value}\n---\n`;
 			await this.app.vault.modify(file, newFrontmatter + content);
@@ -153,12 +245,16 @@ export default class SequentialNoteNavigator extends Plugin {
 		let found = false;
 		for (let j = 1; j < i; j++) {
 			if ((lines[j] as string).startsWith(`${key}:`)) {
-				lines[j] = `${key}: ${value}`;
+				if (value === null) {
+					lines.splice(j, 1);
+				} else {
+					lines[j] = `${key}: ${value}`;
+				}
 				found = true;
 				break;
 			}
 		}
-		if (!found) {
+		if (!found && value !== null) {
 			lines.splice(i, 0, `${key}: ${value}`);
 		}
 
@@ -167,4 +263,3 @@ export default class SequentialNoteNavigator extends Plugin {
 		await this.app.vault.modify(file, newContent);
 	}
 }
-
