@@ -46,7 +46,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		this.addRibbonIcon("signpost", "Open sequence inspector", () => {
 			void this.activateSequenceInspector();
 		});
-    
+
 		this.registerEvent(
 			this.app.metadataCache.on("deleted", (file, prevCache) => {
 				void this.handleDeletedFile(file, prevCache);
@@ -70,7 +70,9 @@ export default class SequentialNoteNavigator extends Plugin {
 			name: "Open sequence inspector",
 			callback: () => {
 				void this.activateSequenceInspector();
-  
+			},
+		});
+
 		this.addCommand({
 			id: "insert-note-before-current",
 			name: "Insert note before current note",
@@ -98,14 +100,6 @@ export default class SequentialNoteNavigator extends Plugin {
 		this.addCommand({
 			id: "remove-current-note-from-sequence",
 			name: "Remove current note from sequence",
-			callback: () => {
-				void this.removeCurrentNoteFromSequence();
-			},
-		});
-
-		this.addCommand({
-			id: "unlink-current-note-from-sequence",
-			name: "Unlink current note from sequence",
 			callback: () => {
 				void this.removeCurrentNoteFromSequence();
 			},
@@ -206,19 +200,6 @@ export default class SequentialNoteNavigator extends Plugin {
 		}
 
 		return nodes;
-	}
-
-	resolveSequenceLink(file: TFile, key: "prev" | "next"): TFile | null {
-		const frontmatter = this.getFrontmatter(file);
-		const rawTarget = frontmatter?.[key] as unknown;
-		if (typeof rawTarget !== "string") return null;
-
-		const cleanTarget = rawTarget.replace(/^\s*['"]?/, "")
-			.replace(/['"]?\s*$/, "")
-			.replace(/^\[\[/, "")
-			.replace(/\]\]$/, "");
-
-		return this.app.metadataCache.getFirstLinkpathDest(cleanTarget, file.path);
 	}
 
 	addNavigationButtons() {
