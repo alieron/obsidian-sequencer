@@ -37,13 +37,13 @@ export default class SequentialNoteNavigator extends Plugin {
 
 		this.addCommand({
 			id: "set-prev-note",
-			name: "Add link to previous note",
+			name: "Add link to previous note (deprecated: use Insert note before current note)",
 			callback: () => this.insertLink("prev"),
 		});
 
 		this.addCommand({
 			id: "set-next-note",
-			name: "Add link to next note",
+			name: "Add link to next note (deprecated: use Insert note after current note)",
 			callback: () => this.insertLink("next"),
 		});
 
