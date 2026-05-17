@@ -42,7 +42,7 @@ export default class SequentialNoteNavigator extends Plugin {
 			})
 		);
 
-		this.addRibbonIcon("list-tree", "Open Sequence Inspector", () => {
+		this.addRibbonIcon("list-tree", "Open sequence inspector", () => {
 			void this.activateSequenceInspector();
 		});
 
@@ -60,7 +60,7 @@ export default class SequentialNoteNavigator extends Plugin {
 
 		this.addCommand({
 			id: "open-sequence-inspector",
-			name: "Open Sequence Inspector",
+			name: "Open sequence inspector",
 			callback: () => {
 				void this.activateSequenceInspector();
 			},
@@ -165,7 +165,7 @@ export default class SequentialNoteNavigator extends Plugin {
 
 	resolveSequenceLink(file: TFile, key: "prev" | "next"): TFile | null {
 		const frontmatter = this.getFrontmatter(file);
-		const rawTarget = frontmatter?.[key];
+		const rawTarget = frontmatter?.[key] as unknown;
 		if (typeof rawTarget !== "string") return null;
 
 		const cleanTarget = rawTarget.replace(/^\s*['"]?/, "")

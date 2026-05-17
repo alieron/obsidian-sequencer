@@ -37,7 +37,7 @@ export class LinkToFileModal extends FuzzySuggestModal<Suggestion> {
 		const unresolvedLinks = new Set<string>();
 		const allLinks = this.app.metadataCache.unresolvedLinks;
 
-		for (const [_, links] of Object.entries(allLinks)) {
+		for (const [, links] of Object.entries(allLinks)) {
 			for (const link of Object.keys(links)) {
 				if (!files.some(f => f.basename === link)) {
 					unresolvedLinks.add(link);
