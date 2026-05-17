@@ -70,6 +70,22 @@ export default class SequentialNoteNavigator extends Plugin {
 				void this.deleteCurrentNoteFromSequence();
 			},
 		});
+
+		this.addCommand({
+			id: "remove-current-note-from-sequence",
+			name: "Remove current note from sequence",
+			callback: () => {
+				void this.removeCurrentNoteFromSequence();
+			},
+		});
+
+		this.addCommand({
+			id: "unlink-current-note-from-sequence",
+			name: "Unlink current note from sequence",
+			callback: () => {
+				void this.removeCurrentNoteFromSequence();
+			},
+		});
 	}
 
 	async loadSettings() {
@@ -265,13 +281,7 @@ export default class SequentialNoteNavigator extends Plugin {
 	}
 
 	async deleteSequencedFile(currentFile: TFile, previousFile: TFile | null, nextFile: TFile | null) {
-		if (previousFile) {
-			await this.updateFrontmatterLink(previousFile, "next", nextFile ? this.getYamlLink(previousFile, nextFile) : null);
-		}
-
-		if (nextFile) {
-			await this.updateFrontmatterLink(nextFile, "prev", previousFile ? this.getYamlLink(nextFile, previousFile) : null);
-		}
+		await this.reconnectSequenceNeighbors(previousFile, nextFile);
 
 		const fileToOpen = nextFile ?? previousFile;
 		this.pluginDeletedPaths.add(currentFile.path);
@@ -284,6 +294,38 @@ export default class SequentialNoteNavigator extends Plugin {
 		new Notice(`Deleted ${currentFile.basename} from the sequence.`);
 	}
 
+	async removeCurrentNoteFromSequence() {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const currentFile = view?.file;
+		if (!currentFile) {
+			new Notice("Run this command with a note open.");
+			return;
+		}
+
+		const previousFile = this.resolveSequenceLink(currentFile, "prev");
+		const nextFile = this.resolveSequenceLink(currentFile, "next");
+
+		if (!previousFile && !nextFile) {
+			new Notice("This note is not connected to a sequence.");
+			return;
+		}
+
+		await this.reconnectSequenceNeighbors(previousFile, nextFile);
+		await this.updateFrontmatterLink(currentFile, "prev", null);
+		await this.updateFrontmatterLink(currentFile, "next", null);
+		new Notice(`Removed ${currentFile.basename} from the sequence.`);
+	}
+
+	async reconnectSequenceNeighbors(previousFile: TFile | null, nextFile: TFile | null) {
+		if (previousFile) {
+			await this.updateFrontmatterLink(previousFile, "next", nextFile ? this.getYamlLink(previousFile, nextFile) : null);
+		}
+
+		if (nextFile) {
+			await this.updateFrontmatterLink(nextFile, "prev", previousFile ? this.getYamlLink(nextFile, previousFile) : null);
+		}
+	}
+
 	async handleDeletedFile(file: TFile, prevCache: CachedMetadata | null) {
 		if (this.pluginDeletedPaths.delete(file.path)) return;
 		if (!this.settings.repairSequenceOnDelete) return;
@@ -294,13 +336,7 @@ export default class SequentialNoteNavigator extends Plugin {
 
 		if (!previousFile && !nextFile) return;
 
-		if (previousFile) {
-			await this.updateFrontmatterLink(previousFile, "next", nextFile ? this.getYamlLink(previousFile, nextFile) : null);
-		}
-
-		if (nextFile) {
-			await this.updateFrontmatterLink(nextFile, "prev", previousFile ? this.getYamlLink(nextFile, previousFile) : null);
-		}
+		await this.reconnectSequenceNeighbors(previousFile, nextFile);
 	}
 
 	resolveSequenceLinkFromFrontmatter(file: TFile, frontmatter: FrontMatterCache | undefined, key: "prev" | "next"): TFile | null {
