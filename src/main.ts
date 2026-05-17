@@ -1,6 +1,88 @@
-import { Plugin, TFile, MarkdownView, Notice, setIcon, FrontMatterCache } from "obsidian";
+import { FrontMatterCache, ItemView, MarkdownView, Notice, Plugin, setIcon, TFile, WorkspaceLeaf } from "obsidian";
 import { LinkToFileModal } from "./modal";
 import { DEFAULT_SETTINGS, SequencerSettings, SequencerSettingTab } from "./settings";
+
+const SEQUENCE_INSPECTOR_VIEW_TYPE = "sequencer-inspector";
+
+type SequenceNode = {
+	file: TFile;
+	isCurrent: boolean;
+};
+
+class SequenceInspectorView extends ItemView {
+	constructor(
+		leaf: WorkspaceLeaf,
+		private plugin: SequentialNoteNavigator,
+	) {
+		super(leaf);
+	}
+
+	getViewType(): string {
+		return SEQUENCE_INSPECTOR_VIEW_TYPE;
+	}
+
+	getDisplayText(): string {
+		return "Sequence Inspector";
+	}
+
+	getIcon(): string {
+		return "list-tree";
+	}
+
+	async onOpen(): Promise<void> {
+		this.render();
+	}
+
+	render(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.addClass("seq-inspector");
+
+		const currentFile = this.plugin.getCurrentMarkdownFile();
+		contentEl.createEl("h2", { text: "Sequence Inspector" });
+
+		if (!currentFile) {
+			contentEl.createEl("p", {
+				cls: "seq-inspector-empty",
+				text: "Open a sequenced note to inspect its chain.",
+			});
+			return;
+		}
+
+		const nodes = this.plugin.getSequenceNodes(currentFile);
+		if (nodes.length === 0) {
+			contentEl.createEl("p", {
+				cls: "seq-inspector-empty",
+				text: "This note is not connected to a sequence.",
+			});
+			return;
+		}
+
+		const listEl = contentEl.createDiv({ cls: "seq-inspector-chain" });
+		for (const node of nodes) {
+			const rowEl = listEl.createDiv({
+				cls: `seq-inspector-node${node.isCurrent ? " is-current" : ""}`,
+			});
+			const markerEl = rowEl.createDiv({ cls: "seq-inspector-marker" });
+			setIcon(markerEl, node.isCurrent ? "circle-dot" : "circle");
+
+			const buttonEl = rowEl.createEl("button", {
+				cls: "seq-inspector-note",
+				text: node.file.basename,
+			});
+			buttonEl.ariaLabel = `Open ${node.file.basename}`;
+			buttonEl.onclick = async () => {
+				const leaf = this.app.workspace.getLeaf(false);
+				await leaf.openFile(node.file);
+			};
+
+			rowEl.createDiv({
+				cls: "seq-inspector-path",
+				text: node.file.path,
+			});
+		}
+	}
+}
 
 export default class SequentialNoteNavigator extends Plugin {
 	settings: SequencerSettings;
@@ -11,9 +93,16 @@ export default class SequentialNoteNavigator extends Plugin {
 		await this.loadSettings();
 
 		this.addSettingTab(new SequencerSettingTab(this.app, this));
+		this.registerView(
+			SEQUENCE_INSPECTOR_VIEW_TYPE,
+			(leaf) => new SequenceInspectorView(leaf, this),
+		);
 
 		this.registerEvent(
-			this.app.workspace.on("active-leaf-change", () => this.addNavigationButtons())
+			this.app.workspace.on("active-leaf-change", () => {
+				this.addNavigationButtons();
+				this.refreshSequenceInspectors();
+			})
 		);
 
 		// run on startup
@@ -25,8 +114,13 @@ export default class SequentialNoteNavigator extends Plugin {
 				if (file.path === activeFile?.path) {
 					this.addNavigationButtons();
 				}
+				this.refreshSequenceInspectors();
 			})
 		);
+
+		this.addRibbonIcon("list-tree", "Open Sequence Inspector", () => {
+			void this.activateSequenceInspector();
+		});
 
 		this.addCommand({
 			id: "set-prev-note",
@@ -38,6 +132,14 @@ export default class SequentialNoteNavigator extends Plugin {
 			id: "set-next-note",
 			name: "Add link to next note",
 			callback: () => this.insertLink("next"),
+		});
+
+		this.addCommand({
+			id: "open-sequence-inspector",
+			name: "Open Sequence Inspector",
+			callback: () => {
+				void this.activateSequenceInspector();
+			},
 		});
 	}
 
@@ -51,6 +153,79 @@ export default class SequentialNoteNavigator extends Plugin {
 
 	onunload() {
 		console.debug("Unloading Obsidian Sequencer plugin...");
+	}
+
+	getCurrentMarkdownFile(): TFile | null {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		return view?.file ?? null;
+	}
+
+	async activateSequenceInspector() {
+		const existingLeaves = this.app.workspace.getLeavesOfType(SEQUENCE_INSPECTOR_VIEW_TYPE);
+		if (existingLeaves.length > 0) {
+			await this.app.workspace.revealLeaf(existingLeaves[0]!);
+			this.refreshSequenceInspectors();
+			return;
+		}
+
+		const leaf = this.app.workspace.getRightLeaf(false);
+		if (!leaf) return;
+
+		await leaf.setViewState({ type: SEQUENCE_INSPECTOR_VIEW_TYPE, active: true });
+		await this.app.workspace.revealLeaf(leaf);
+	}
+
+	refreshSequenceInspectors() {
+		for (const leaf of this.app.workspace.getLeavesOfType(SEQUENCE_INSPECTOR_VIEW_TYPE)) {
+			if (leaf.view instanceof SequenceInspectorView) {
+				leaf.view.render();
+			}
+		}
+	}
+
+	getSequenceNodes(currentFile: TFile): SequenceNode[] {
+		const currentFrontmatter = this.getFrontmatter(currentFile);
+		if (!currentFrontmatter?.prev && !currentFrontmatter?.next) {
+			return [];
+		}
+
+		let firstFile = currentFile;
+		const reverseVisited = new Set<string>([currentFile.path]);
+		let previousFile = this.resolveSequenceLink(currentFile, "prev");
+
+		while (previousFile && !reverseVisited.has(previousFile.path)) {
+			firstFile = previousFile;
+			reverseVisited.add(previousFile.path);
+			previousFile = this.resolveSequenceLink(previousFile, "prev");
+		}
+
+		const nodes: SequenceNode[] = [];
+		const forwardVisited = new Set<string>();
+		let nextFile: TFile | null = firstFile;
+
+		while (nextFile && !forwardVisited.has(nextFile.path)) {
+			nodes.push({
+				file: nextFile,
+				isCurrent: nextFile.path === currentFile.path,
+			});
+			forwardVisited.add(nextFile.path);
+			nextFile = this.resolveSequenceLink(nextFile, "next");
+		}
+
+		return nodes;
+	}
+
+	resolveSequenceLink(file: TFile, key: "prev" | "next"): TFile | null {
+		const frontmatter = this.getFrontmatter(file);
+		const rawTarget = frontmatter?.[key];
+		if (typeof rawTarget !== "string") return null;
+
+		const cleanTarget = rawTarget.replace(/^\s*['"]?/, "")
+			.replace(/['"]?\s*$/, "")
+			.replace(/^\[\[/, "")
+			.replace(/\]\]$/, "");
+
+		return this.app.metadataCache.getFirstLinkpathDest(cleanTarget, file.path);
 	}
 
 	addNavigationButtons() {
@@ -167,4 +342,3 @@ export default class SequentialNoteNavigator extends Plugin {
 		await this.app.vault.modify(file, newContent);
 	}
 }
-
