@@ -22,11 +22,11 @@ class SequenceInspectorView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Sequence Inspector";
+		return "Sequence inspector";
 	}
 
 	getIcon(): string {
-		return "list-tree";
+		return "signpost";
 	}
 
 	async onOpen(): Promise<void> {
