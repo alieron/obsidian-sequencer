@@ -72,8 +72,7 @@ class SequenceInspectorView extends ItemView {
 			});
 			buttonEl.ariaLabel = `Open ${node.file.basename}`;
 			buttonEl.onclick = async () => {
-				const leaf = this.app.workspace.getLeaf(false);
-				await leaf.openFile(node.file);
+				await this.plugin.openSequenceFile(node.file);
 			};
 
 			rowEl.createDiv({
@@ -86,6 +85,8 @@ class SequenceInspectorView extends ItemView {
 
 export default class SequentialNoteNavigator extends Plugin {
 	settings: SequencerSettings;
+	private lastFocusedMarkdownFile: TFile | null = null;
+	private lastFocusedMarkdownLeaf: WorkspaceLeaf | null = null;
 
 	async onload() {
 		console.debug("Loading Obsidian Sequencer plugin...");
@@ -100,12 +101,14 @@ export default class SequentialNoteNavigator extends Plugin {
 
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", () => {
+				this.rememberActiveMarkdownView();
 				this.addNavigationButtons();
 				this.refreshSequenceInspectors();
 			})
 		);
 
 		// run on startup
+		this.rememberActiveMarkdownView();
 		this.addNavigationButtons();
 
 		this.registerEvent(
@@ -157,7 +160,31 @@ export default class SequentialNoteNavigator extends Plugin {
 
 	getCurrentMarkdownFile(): TFile | null {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		return view?.file ?? null;
+		if (view?.file) {
+			this.lastFocusedMarkdownFile = view.file;
+			this.lastFocusedMarkdownLeaf = view.leaf;
+			return view.file;
+		}
+
+		return this.lastFocusedMarkdownFile;
+	}
+
+	rememberActiveMarkdownView() {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view?.file) return;
+
+		this.lastFocusedMarkdownFile = view.file;
+		this.lastFocusedMarkdownLeaf = view.leaf;
+	}
+
+	async openSequenceFile(file: TFile) {
+		const activeMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const leaf = activeMarkdownView?.leaf ?? this.lastFocusedMarkdownLeaf ?? this.app.workspace.getLeaf(false);
+
+		await leaf.openFile(file);
+		this.lastFocusedMarkdownFile = file;
+		this.lastFocusedMarkdownLeaf = leaf;
+		this.refreshSequenceInspectors();
 	}
 
 	async activateSequenceInspector() {
