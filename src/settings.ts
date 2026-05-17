@@ -4,11 +4,15 @@ import SequentialNoteNavigator from "./main";
 export interface SequencerSettings {
 	reciprocalLinks: boolean;
 	onlySiblingFiles: boolean;
+	repairSequenceOnDelete: boolean;
+	confirmSequenceDelete: boolean;
 }
 
 export const DEFAULT_SETTINGS: SequencerSettings = {
 	reciprocalLinks: true,
-	onlySiblingFiles: true
+	onlySiblingFiles: true,
+	repairSequenceOnDelete: true,
+	confirmSequenceDelete: true
 }
 
 export class SequencerSettingTab extends PluginSettingTab {
@@ -44,6 +48,30 @@ export class SequencerSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.onlySiblingFiles)
 					.onChange(async (value) => {
 						this.plugin.settings.onlySiblingFiles = value;
+						await this.plugin.saveSettings();
+						this.display()
+					})
+			);
+		new Setting(containerEl)
+			.setName('Repair sequences when deleting notes')
+			.setDesc('When a note in a sequence is deleted, reconnect the previous and next notes automatically.')
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.repairSequenceOnDelete)
+					.onChange(async (value) => {
+						this.plugin.settings.repairSequenceOnDelete = value;
+						await this.plugin.saveSettings();
+						this.display()
+					})
+			);
+		new Setting(containerEl)
+			.setName('Confirm sequence note deletion')
+			.setDesc('Ask before the sequencer delete command removes a note and reconnects the sequence.')
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.confirmSequenceDelete)
+					.onChange(async (value) => {
+						this.plugin.settings.confirmSequenceDelete = value;
 						await this.plugin.saveSettings();
 						this.display()
 					})

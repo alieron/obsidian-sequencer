@@ -1,4 +1,4 @@
-import { App, FuzzySuggestModal, normalizePath, TFile } from "obsidian";
+import { App, FuzzySuggestModal, Modal, normalizePath, Setting, TFile } from "obsidian";
 import { SequencerSettings } from "./settings";
 
 type Suggestion = {
@@ -196,5 +196,57 @@ export class InsertSequenceNoteModal extends FuzzySuggestModal<Suggestion> {
 
 			await this.onChooseFile(targetFile);
 		})();
+	}
+}
+
+export class ConfirmSequenceDeleteModal extends Modal {
+	private dontAskAgain = false;
+
+	constructor(
+		app: App,
+		private file: TFile,
+		private onConfirm: (dontAskAgain: boolean) => Promise<void>,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		const { contentEl } = this;
+		this.setTitle("Delete sequence note?");
+		contentEl.empty();
+		contentEl.createEl("p", {
+			text: `Delete "${this.file.basename}" and reconnect its previous and next notes?`,
+		});
+
+		new Setting(contentEl)
+			.setName("Don't ask again")
+			.setDesc("Sequencer will still reconnect the sequence when using this command.")
+			.addToggle((toggle) => {
+				toggle.onChange((value) => {
+					this.dontAskAgain = value;
+				});
+			});
+
+		new Setting(contentEl)
+			.addButton((button) => {
+				button
+					.setButtonText("Cancel")
+					.onClick(() => this.close());
+			})
+			.addButton((button) => {
+				button
+					.setButtonText("Delete")
+					.setCta()
+					.onClick(() => {
+						void (async () => {
+							await this.onConfirm(this.dontAskAgain);
+							this.close();
+						})();
+					});
+			});
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }

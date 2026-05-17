@@ -1,9 +1,10 @@
-import { FrontMatterCache, MarkdownView, Notice, Plugin, setIcon, TFile } from "obsidian";
-import { InsertSequenceNoteModal, LinkToFileModal } from "./modal";
+import { CachedMetadata, FrontMatterCache, MarkdownView, Notice, Plugin, setIcon, TFile } from "obsidian";
+import { ConfirmSequenceDeleteModal, InsertSequenceNoteModal, LinkToFileModal } from "./modal";
 import { DEFAULT_SETTINGS, SequencerSettings, SequencerSettingTab } from "./settings";
 
 export default class SequentialNoteNavigator extends Plugin {
 	settings: SequencerSettings;
+	private pluginDeletedPaths = new Set<string>();
 
 	async onload() {
 		console.debug("Loading Obsidian Sequencer plugin...");
@@ -25,6 +26,12 @@ export default class SequentialNoteNavigator extends Plugin {
 				if (file.path === activeFile?.path) {
 					this.addNavigationButtons();
 				}
+			})
+		);
+
+		this.registerEvent(
+			this.app.metadataCache.on("deleted", (file, prevCache) => {
+				void this.handleDeletedFile(file, prevCache);
 			})
 		);
 
@@ -56,6 +63,13 @@ export default class SequentialNoteNavigator extends Plugin {
 			},
 		});
 
+		this.addCommand({
+			id: "delete-current-note-from-sequence",
+			name: "Delete current note from sequence",
+			callback: () => {
+				void this.deleteCurrentNoteFromSequence();
+			},
+		});
 	}
 
 	async loadSettings() {
@@ -217,6 +231,87 @@ export default class SequentialNoteNavigator extends Plugin {
 		}
 
 		new Notice(`Inserted ${targetFile.basename} ${position} ${currentFile.basename}.`);
+	}
+
+	async deleteCurrentNoteFromSequence() {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		const currentFile = view?.file;
+		if (!currentFile) {
+			new Notice("Run this command with a note open.");
+			return;
+		}
+
+		const previousFile = this.resolveSequenceLink(currentFile, "prev");
+		const nextFile = this.resolveSequenceLink(currentFile, "next");
+
+		if (!previousFile && !nextFile) {
+			new Notice("This note is not connected to a sequence.");
+			return;
+		}
+
+		if (!this.settings.confirmSequenceDelete) {
+			await this.deleteSequencedFile(currentFile, previousFile, nextFile);
+			return;
+		}
+
+		new ConfirmSequenceDeleteModal(this.app, currentFile, async (dontAskAgain) => {
+			if (dontAskAgain) {
+				this.settings.confirmSequenceDelete = false;
+				await this.saveSettings();
+			}
+
+			await this.deleteSequencedFile(currentFile, previousFile, nextFile);
+		}).open();
+	}
+
+	async deleteSequencedFile(currentFile: TFile, previousFile: TFile | null, nextFile: TFile | null) {
+		if (previousFile) {
+			await this.updateFrontmatterLink(previousFile, "next", nextFile ? this.getYamlLink(previousFile, nextFile) : null);
+		}
+
+		if (nextFile) {
+			await this.updateFrontmatterLink(nextFile, "prev", previousFile ? this.getYamlLink(nextFile, previousFile) : null);
+		}
+
+		const fileToOpen = nextFile ?? previousFile;
+		this.pluginDeletedPaths.add(currentFile.path);
+		await this.app.fileManager.trashFile(currentFile);
+
+		if (fileToOpen) {
+			await this.app.workspace.getLeaf(false).openFile(fileToOpen);
+		}
+
+		new Notice(`Deleted ${currentFile.basename} from the sequence.`);
+	}
+
+	async handleDeletedFile(file: TFile, prevCache: CachedMetadata | null) {
+		if (this.pluginDeletedPaths.delete(file.path)) return;
+		if (!this.settings.repairSequenceOnDelete) return;
+
+		const frontmatter = prevCache?.frontmatter;
+		const previousFile = this.resolveSequenceLinkFromFrontmatter(file, frontmatter, "prev");
+		const nextFile = this.resolveSequenceLinkFromFrontmatter(file, frontmatter, "next");
+
+		if (!previousFile && !nextFile) return;
+
+		if (previousFile) {
+			await this.updateFrontmatterLink(previousFile, "next", nextFile ? this.getYamlLink(previousFile, nextFile) : null);
+		}
+
+		if (nextFile) {
+			await this.updateFrontmatterLink(nextFile, "prev", previousFile ? this.getYamlLink(nextFile, previousFile) : null);
+		}
+	}
+
+	resolveSequenceLinkFromFrontmatter(file: TFile, frontmatter: FrontMatterCache | undefined, key: "prev" | "next"): TFile | null {
+		const rawTarget: unknown = frontmatter?.[key];
+		if (typeof rawTarget !== "string") return null;
+
+		const cleanTarget = this.cleanLinkTarget(rawTarget);
+		const resolved = this.app.metadataCache.getFirstLinkpathDest(cleanTarget, file.path);
+		if (!resolved) return null;
+
+		return this.app.vault.getFileByPath(resolved.path);
 	}
 
 	async updateFrontmatterLink(file: TFile, key: "prev" | "next", value: string | null) {
