@@ -39,7 +39,6 @@ class SequenceInspectorView extends ItemView {
 		contentEl.addClass("seq-inspector");
 
 		const currentFile = this.plugin.getCurrentMarkdownFile();
-		contentEl.createEl("h2", { text: "Sequence Inspector" });
 
 		if (!currentFile) {
 			contentEl.createEl("p", {
@@ -68,17 +67,14 @@ class SequenceInspectorView extends ItemView {
 
 			const buttonEl = rowEl.createEl("button", {
 				cls: "seq-inspector-note",
-				text: node.file.basename,
-			});
-			buttonEl.ariaLabel = `Open ${node.file.basename}`;
-			buttonEl.onclick = async () => {
-				await this.plugin.openSequenceFile(node.file);
-			};
-
-			rowEl.createDiv({
-				cls: "seq-inspector-path",
 				text: node.file.path,
 			});
+			buttonEl.ariaLabel = `Open ${node.file.basename}`;
+			buttonEl.onpointerdown = async (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				await this.plugin.openSequenceFile(node.file);
+			};
 		}
 	}
 }
