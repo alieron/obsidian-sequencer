@@ -1,10 +1,11 @@
-import { CachedMetadata, FrontMatterCache, MarkdownView, Notice, Plugin, setIcon, TFile } from "obsidian";
-import { ConfirmSequenceDeleteModal, InsertSequenceNoteModal, LinkToFileModal } from "./modal";
+import { CachedMetadata, FrontMatterCache, getFrontMatterInfo, getLinkpath, MarkdownView, Notice, parseYaml, Plugin, setIcon, TFile } from "obsidian";
+import { ConfirmSequenceDeleteModal, InsertSequenceNoteModal } from "./modal";
 import { DEFAULT_SETTINGS, SequencerSettings, SequencerSettingTab } from "./settings";
 
 export default class SequentialNoteNavigator extends Plugin {
 	settings: SequencerSettings;
 	private pluginDeletedPaths = new Set<string>();
+	private sequenceSnapshots = new Map<string, CachedMetadata>();
 
 	async onload() {
 		console.debug("Loading Obsidian Sequencer plugin...");
@@ -21,7 +22,8 @@ export default class SequentialNoteNavigator extends Plugin {
 		this.addNavigationButtons();
 
 		this.registerEvent(
-			this.app.metadataCache.on("changed", (file) => {
+			this.app.metadataCache.on("changed", (file, _data, cache) => {
+				this.snapshotSequenceMetadata(file, cache);
 				const activeFile = this.app.workspace.getActiveFile();
 				if (file.path === activeFile?.path) {
 					this.addNavigationButtons();
@@ -29,22 +31,34 @@ export default class SequentialNoteNavigator extends Plugin {
 			})
 		);
 
+		this.app.workspace.onLayoutReady(() => {
+			for (const file of this.app.vault.getMarkdownFiles()) {
+				const cache = this.app.metadataCache.getFileCache(file);
+				if (cache) this.snapshotSequenceMetadata(file, cache);
+			}
+		});
+		this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+			const cache = this.sequenceSnapshots.get(oldPath);
+			this.sequenceSnapshots.delete(oldPath);
+			if (cache) this.sequenceSnapshots.set(file.path, cache);
+		}));
+
 		this.registerEvent(
 			this.app.metadataCache.on("deleted", (file, prevCache) => {
-				void this.handleDeletedFile(file, prevCache);
+				return this.runSequenceAction(() => this.handleDeletedFile(file, prevCache));
 			})
 		);
 
 		this.addCommand({
 			id: "set-prev-note",
 			name: "Add link to previous note (deprecated: use 'insert note before current note')",
-			callback: () => this.insertLink("prev"),
+			callback: () => this.insertNoteAroundCurrent("before"),
 		});
 
 		this.addCommand({
 			id: "set-next-note",
 			name: "Add link to next note (deprecated: use 'insert note after current note')",
-			callback: () => this.insertLink("next"),
+			callback: () => this.insertNoteAroundCurrent("after"),
 		});
 
 		this.addCommand({
@@ -67,7 +81,7 @@ export default class SequentialNoteNavigator extends Plugin {
 			id: "delete-current-note-from-sequence",
 			name: "Delete current note from sequence",
 			callback: () => {
-				void this.deleteCurrentNoteFromSequence();
+				void this.runSequenceAction(() => this.deleteCurrentNoteFromSequence());
 			},
 		});
 
@@ -75,7 +89,7 @@ export default class SequentialNoteNavigator extends Plugin {
 			id: "remove-current-note-from-sequence",
 			name: "Remove current note from sequence",
 			callback: () => {
-				void this.removeCurrentNoteFromSequence();
+				void this.runSequenceAction(() => this.removeCurrentNoteFromSequence());
 			},
 		});
 
@@ -83,7 +97,7 @@ export default class SequentialNoteNavigator extends Plugin {
 			id: "unlink-current-note-from-sequence",
 			name: "Unlink current note from sequence",
 			callback: () => {
-				void this.removeCurrentNoteFromSequence();
+				void this.runSequenceAction(() => this.removeCurrentNoteFromSequence());
 			},
 		});
 	}
@@ -118,10 +132,10 @@ export default class SequentialNoteNavigator extends Plugin {
 		if (!frontmatter) return;
 
 		if (frontmatter.next || frontmatter.prev) {
-			const nextBtn = this.createNavButton("next", frontmatter.next as string | undefined);
+			const nextBtn = this.createNavButton("next", frontmatter.next, file);
 			actionsEl.insertBefore(nextBtn, actionsEl.firstChild);
 
-			const prevBtn = this.createNavButton("prev", frontmatter.prev as string | undefined);
+			const prevBtn = this.createNavButton("prev", frontmatter.prev, file);
 			actionsEl.insertBefore(prevBtn, actionsEl.firstChild);
 		}
 
@@ -132,7 +146,8 @@ export default class SequentialNoteNavigator extends Plugin {
 		return cache?.frontmatter ?? null;
 	}
 
-	createNavButton(label: "prev" | "next", target: string | undefined): HTMLButtonElement {
+	createNavButton(label: "prev" | "next", value: unknown, source: TFile): HTMLButtonElement {
+		const target = this.sequenceTarget(value);
 		const btn = document.createElement("button");
 		btn.disabled = !target;
 		btn.classList.add("clickable-icon", "seq-nav-button");
@@ -144,8 +159,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		if (target) {
 			btn.ariaLabel = `${label === "prev" ? "Previous Note" : "Next Note"}\nClick to open\nCtrl+Click to open to the right`
 			btn.onclick = async (event: MouseEvent) => {
-				const cleanTarget = target.replace(/\[\[|\]\]/g, "");
-				const resolved = this.app.metadataCache.getFirstLinkpathDest(cleanTarget, "");
+				const resolved = this.app.metadataCache.getFirstLinkpathDest(this.cleanLinkTarget(target), source.path);
 				if (!resolved) {
 					new Notice(`Note not found: ${target}`);
 					return;
@@ -163,40 +177,51 @@ export default class SequentialNoteNavigator extends Plugin {
 		return btn;
 	}
 
-	insertLink(key: "prev" | "next") {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		const file = view?.file;
-		if (!file) {
-			new Notice("Run this command with a note open.");
-			return;
+	async runSequenceAction(action: () => Promise<unknown>) {
+		try {
+			await action();
+		} catch (error) {
+			console.error("Sequencer operation failed", error);
+			new Notice(`Sequence operation failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
-
-
-		const modal = new LinkToFileModal(this.app, this.settings, file, key);
-
-		modal.open();
 	}
 
-	resolveSequenceLink(file: TFile, key: "prev" | "next"): TFile | null {
-		const frontmatter = this.getFrontmatter(file);
-		const rawTarget: unknown = frontmatter?.[key];
-		if (typeof rawTarget !== "string") return null;
+	sequenceTarget(value: unknown, strict = false): string | null {
+		if (Array.isArray(value) && value.length === 1) value = value[0];
+		if (typeof value === "string") return value.trim() || null;
+		if (strict && value != null && (!Array.isArray(value) || value.length > 0)) {
+			throw new Error("Sequence properties must be a string or a singleton string list.");
+		}
+		return null;
+	}
 
-		const cleanTarget = this.cleanLinkTarget(rawTarget);
-
-		return this.app.metadataCache.getFirstLinkpathDest(cleanTarget, file.path);
+	async readSequence(file: TFile, allowMissing = false) {
+		const content = await this.app.vault.read(file);
+		const info = getFrontMatterInfo(content);
+		if (!info.exists && /^(?:\uFEFF)?---\r?\n/.test(content)) {
+			throw new Error(`Invalid frontmatter in ${file.path}`);
+		}
+		const frontmatter: unknown = info.exists ? parseYaml(info.frontmatter) : {};
+		if (frontmatter != null && (typeof frontmatter !== "object" || Array.isArray(frontmatter))) {
+			throw new Error(`Invalid frontmatter in ${file.path}`);
+		}
+		const fm = (frontmatter ?? {}) as FrontMatterCache;
+		return {
+			prev: this.resolveSequenceLinkFromFrontmatter(file, fm, "prev", allowMissing),
+			next: this.resolveSequenceLinkFromFrontmatter(file, fm, "next", allowMissing),
+		};
 	}
 
 	cleanLinkTarget(target: string): string {
-		return target.replace(/^\s*['"]?/, "")
+		return getLinkpath(target.replace(/^\s*['"]?/, "")
 			.replace(/['"]?\s*$/, "")
 			.replace(/^\[\[/, "")
-			.replace(/\]\]$/, "");
+			.replace(/\]\]$/, "").split("|")[0] ?? "");
 	}
 
 	getYamlLink(sourceFile: TFile, targetFile: TFile): string {
 		const linktext = this.app.metadataCache.fileToLinktext(targetFile, sourceFile.path);
-		return `"[[${linktext}]]"`;
+		return `[[${linktext}]]`;
 	}
 
 	insertNoteAroundCurrent(position: "before" | "after") {
@@ -213,8 +238,11 @@ export default class SequentialNoteNavigator extends Plugin {
 			currentFile,
 			position,
 			async (targetFile) => {
-				await this.insertSelectedNoteAroundCurrent(currentFile, targetFile, position);
-				await view.leaf.openFile(targetFile);
+				await this.runSequenceAction(async () => {
+					if (await this.insertSelectedNoteAroundCurrent(currentFile, targetFile, position)) {
+						await view.leaf.openFile(targetFile);
+					}
+				});
 			},
 		);
 
@@ -227,8 +255,16 @@ export default class SequentialNoteNavigator extends Plugin {
 			return;
 		}
 
-		const previousFile = this.resolveSequenceLink(currentFile, "prev");
-		const nextFile = this.resolveSequenceLink(currentFile, "next");
+		const { prev: previousFile, next: nextFile } = await this.readSequence(currentFile);
+		if ((position === "before" ? previousFile : nextFile)?.path === targetFile.path) return true;
+		// ponytail: reject moves; detaching an existing sequence needs a separate operation.
+		const targetSequence = await this.readSequence(targetFile);
+		if (targetSequence.prev || targetSequence.next) {
+			new Notice("Remove this note from its sequence before inserting it elsewhere.");
+			return false;
+		}
+		const neighbor = position === "before" ? previousFile : nextFile;
+		if (neighbor) await this.readSequence(neighbor);
 
 		if (position === "before") {
 			await this.updateFrontmatterLink(targetFile, "prev", previousFile ? this.getYamlLink(targetFile, previousFile) : null);
@@ -247,6 +283,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		}
 
 		new Notice(`Inserted ${targetFile.basename} ${position} ${currentFile.basename}.`);
+		return true;
 	}
 
 	async deleteCurrentNoteFromSequence() {
@@ -257,8 +294,7 @@ export default class SequentialNoteNavigator extends Plugin {
 			return;
 		}
 
-		const previousFile = this.resolveSequenceLink(currentFile, "prev");
-		const nextFile = this.resolveSequenceLink(currentFile, "next");
+		const { prev: previousFile, next: nextFile } = await this.readSequence(currentFile);
 
 		if (!previousFile && !nextFile) {
 			new Notice("This note is not connected to a sequence.");
@@ -266,7 +302,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		}
 
 		if (!this.settings.confirmSequenceDelete) {
-			await this.deleteSequencedFile(currentFile, previousFile, nextFile);
+			await this.deleteSequencedFile(currentFile);
 			return;
 		}
 
@@ -276,16 +312,22 @@ export default class SequentialNoteNavigator extends Plugin {
 				await this.saveSettings();
 			}
 
-			await this.deleteSequencedFile(currentFile, previousFile, nextFile);
+			await this.runSequenceAction(() => this.deleteSequencedFile(currentFile));
 		}).open();
 	}
 
-	async deleteSequencedFile(currentFile: TFile, previousFile: TFile | null, nextFile: TFile | null) {
+	async deleteSequencedFile(currentFile: TFile) {
+		const { prev: previousFile, next: nextFile } = await this.readSequence(currentFile);
 		await this.reconnectSequenceNeighbors(previousFile, nextFile);
 
 		const fileToOpen = nextFile ?? previousFile;
 		this.pluginDeletedPaths.add(currentFile.path);
-		await this.app.fileManager.trashFile(currentFile);
+		try {
+			await this.app.fileManager.trashFile(currentFile);
+		} catch (error) {
+			this.pluginDeletedPaths.delete(currentFile.path);
+			throw error;
+		}
 
 		if (fileToOpen) {
 			await this.app.workspace.getLeaf(false).openFile(fileToOpen);
@@ -302,8 +344,7 @@ export default class SequentialNoteNavigator extends Plugin {
 			return;
 		}
 
-		const previousFile = this.resolveSequenceLink(currentFile, "prev");
-		const nextFile = this.resolveSequenceLink(currentFile, "next");
+		const { prev: previousFile, next: nextFile } = await this.readSequence(currentFile);
 
 		if (!previousFile && !nextFile) {
 			new Notice("This note is not connected to a sequence.");
@@ -317,6 +358,9 @@ export default class SequentialNoteNavigator extends Plugin {
 	}
 
 	async reconnectSequenceNeighbors(previousFile: TFile | null, nextFile: TFile | null) {
+		// Validate both neighbors before the first write, including ambiguous list properties.
+		if (previousFile) await this.readSequence(previousFile, true);
+		if (nextFile) await this.readSequence(nextFile, true);
 		if (previousFile) {
 			await this.updateFrontmatterLink(previousFile, "next", nextFile ? this.getYamlLink(previousFile, nextFile) : null);
 		}
@@ -326,11 +370,27 @@ export default class SequentialNoteNavigator extends Plugin {
 		}
 	}
 
+	snapshotSequenceMetadata(file: TFile, cache: CachedMetadata) {
+		const frontmatter: FrontMatterCache = {};
+		for (const key of ["prev", "next"]) {
+			const value: unknown = cache.frontmatter?.[key];
+			frontmatter[key] = Array.isArray(value) ? [...(value as unknown[])] : value;
+		}
+		this.sequenceSnapshots.set(file.path, { frontmatter });
+	}
+
 	async handleDeletedFile(file: TFile, prevCache: CachedMetadata | null) {
+		const cache = prevCache ?? this.sequenceSnapshots.get(file.path);
+		this.sequenceSnapshots.delete(file.path);
 		if (this.pluginDeletedPaths.delete(file.path)) return;
 		if (!this.settings.repairSequenceOnDelete) return;
+		// Incoming links cannot reliably identify a unique chain for an unindexed note.
+		if (!cache) {
+			new Notice(`Cannot repair the sequence for ${file.basename}: previous metadata is unavailable.`);
+			return;
+		}
 
-		const frontmatter = prevCache?.frontmatter;
+		const frontmatter = cache.frontmatter;
 		const previousFile = this.resolveSequenceLinkFromFrontmatter(file, frontmatter, "prev");
 		const nextFile = this.resolveSequenceLinkFromFrontmatter(file, frontmatter, "next");
 
@@ -339,58 +399,24 @@ export default class SequentialNoteNavigator extends Plugin {
 		await this.reconnectSequenceNeighbors(previousFile, nextFile);
 	}
 
-	resolveSequenceLinkFromFrontmatter(file: TFile, frontmatter: FrontMatterCache | undefined, key: "prev" | "next"): TFile | null {
-		const rawTarget: unknown = frontmatter?.[key];
-		if (typeof rawTarget !== "string") return null;
+	resolveSequenceLinkFromFrontmatter(file: TFile, frontmatter: FrontMatterCache | undefined, key: "prev" | "next", allowMissing = false): TFile | null {
+		const rawTarget = this.sequenceTarget(frontmatter?.[key], true);
+		if (!rawTarget) return null;
 
 		const cleanTarget = this.cleanLinkTarget(rawTarget);
 		const resolved = this.app.metadataCache.getFirstLinkpathDest(cleanTarget, file.path);
-		if (!resolved) return null;
+		if (!resolved && allowMissing) return null;
+		if (!resolved || resolved.path === file.path) throw new Error(`Invalid ${key} link in ${file.path}`);
 
 		return this.app.vault.getFileByPath(resolved.path);
 	}
 
 	async updateFrontmatterLink(file: TFile, key: "prev" | "next", value: string | null) {
-		if (!this.app.vault.getFileByPath(file.path)) return;
-
-		const content = await this.app.vault.read(file);
-		const lines = content.split("\n");
-
-		if (lines[0] !== "---") {
-			if (value === null) return;
-			// no frontmatter — insert a new block
-			const newFrontmatter = `---\n${key}: ${value}\n---\n`;
-			await this.app.vault.modify(file, newFrontmatter + content);
-			return;
-		}
-
-		// find the end of the frontmatter
-		let i = 1;
-		while (i < lines.length && lines[i] !== "---") i++;
-		if (i >= lines.length) {
-			new Notice("Invalid frontmatter format.");
-			return;
-		}
-
-		// insert the link
-		let found = false;
-		for (let j = 1; j < i; j++) {
-			if ((lines[j] as string).startsWith(`${key}:`)) {
-				if (value === null) {
-					lines.splice(j, 1);
-				} else {
-					lines[j] = `${key}: ${value}`;
-				}
-				found = true;
-				break;
-			}
-		}
-		if (!found && value !== null) {
-			lines.splice(i, 0, `${key}: ${value}`);
-		}
-
-		// write the frontmatter back to the file
-		const newContent = lines.join("\n");
-		await this.app.vault.modify(file, newContent);
+		if (!this.app.vault.getFileByPath(file.path)) throw new Error(`Note no longer exists: ${file.path}`);
+		await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+			this.sequenceTarget(frontmatter[key], true);
+			if (value === null) delete frontmatter[key];
+			else frontmatter[key] = value;
+		});
 	}
 }

@@ -17,6 +17,8 @@ next: "[[Chapter 3]]"
 
 When a note has either `prev` or `next`, Sequencer adds previous and next arrow buttons to the note header. Click an arrow to open the linked note, or Ctrl-click/Cmd-click to open it in a new tab.
 
+Sequence properties accept a string or a singleton string list (for example, `next: ["[[Chapter 3]]"]`). Multi-target lists are not supported.
+
 ## Getting Started
 
 1. Open the first note in your sequence.
@@ -27,6 +29,8 @@ When a note has either `prev` or `next`, Sequencer adds previous and next arrow 
 Sequencer writes the matching links needed to keep the chain connected. For example, inserting `Chapter 2` after `Chapter 1` adds `next: "[[Chapter 2]]"` to `Chapter 1` and `prev: "[[Chapter 1]]"` to `Chapter 2`.
 
 ## Commands
+
+The legacy **Add link to previous note** and **Add link to next note** commands now insert notes before or after the current note, including reconnecting neighbors. Targets already connected to another sequence are rejected; remove them from that sequence first. Selecting the existing neighbor is a no-op.
 
 ### Insert Note Before Current Note
 
@@ -91,6 +95,8 @@ Turn this off if your sequences often cross folder boundaries.
 ### Repair Sequences When Deleting Notes
 
 When enabled, Sequencer watches for normal Obsidian file deletes. If a deleted note had `prev` or `next` sequence links, Sequencer reconnects the neighboring notes automatically.
+
+Repair uses Obsidian's previous metadata, falling back to lightweight sequence metadata snapshots captured at startup and refreshed on metadata changes. If a note was never indexed and neither source is available, Sequencer shows a notice instead of guessing its neighbors.
 
 ### Confirm Sequence Note Deletion
 
