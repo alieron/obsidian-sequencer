@@ -1,11 +1,19 @@
 import { CachedMetadata, FrontMatterCache, getFrontMatterInfo, getLinkpath, MarkdownView, Notice, parseYaml, Plugin, setIcon, TFile } from "obsidian";
 import { ConfirmSequenceDeleteModal, InsertSequenceNoteModal } from "./modal";
 import { DEFAULT_SETTINGS, SequencerSettings, SequencerSettingTab } from "./settings";
+import { DEFAULT_INVERSE_RELATIONS, parseInverseRelations } from "./relations";
 
 export default class SequentialNoteNavigator extends Plugin {
 	settings: SequencerSettings;
 	private pluginDeletedPaths = new Set<string>();
 	private sequenceSnapshots = new Map<string, CachedMetadata>();
+	private mutationQueue: Promise<unknown> = Promise.resolve();
+	private relations = parseInverseRelations(DEFAULT_INVERSE_RELATIONS);
+	private relationSetting = DEFAULT_INVERSE_RELATIONS;
+	private reciprocalSetting = true;
+	private snapshotsReady = false;
+	private pendingRelations = new Set<string>();
+	private unseededPaths = new Set<string>();
 
 	async onload() {
 		console.debug("Loading Obsidian Sequencer plugin...");
@@ -23,7 +31,8 @@ export default class SequentialNoteNavigator extends Plugin {
 
 		this.registerEvent(
 			this.app.metadataCache.on("changed", (file, _data, cache) => {
-				this.snapshotSequenceMetadata(file, cache);
+				if (this.snapshotsReady) void this.runSequenceAction(() => this.enqueueMutation(() => this.syncRelations(file)));
+				else this.snapshotSequenceMetadata(file, cache);
 				const activeFile = this.app.workspace.getActiveFile();
 				if (file.path === activeFile?.path) {
 					this.addNavigationButtons();
@@ -35,17 +44,28 @@ export default class SequentialNoteNavigator extends Plugin {
 			for (const file of this.app.vault.getMarkdownFiles()) {
 				const cache = this.app.metadataCache.getFileCache(file);
 				if (cache) this.snapshotSequenceMetadata(file, cache);
+				else this.unseededPaths.add(file.path);
 			}
+			this.snapshotsReady = true;
 		});
+		this.registerEvent(this.app.metadataCache.on("resolved", () => {
+			for (const path of this.pendingRelations) {
+				const file = this.app.vault.getFileByPath(path);
+				if (file) void this.runSequenceAction(() => this.enqueueMutation(() => this.syncRelations(file)));
+			}
+		}));
 		this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
 			const cache = this.sequenceSnapshots.get(oldPath);
 			this.sequenceSnapshots.delete(oldPath);
 			if (cache) this.sequenceSnapshots.set(file.path, cache);
+			if (this.pendingRelations.delete(oldPath)) this.pendingRelations.add(file.path);
+			if (this.unseededPaths.delete(oldPath)) this.unseededPaths.add(file.path);
 		}));
 
 		this.registerEvent(
 			this.app.metadataCache.on("deleted", (file, prevCache) => {
-				return this.runSequenceAction(() => this.handleDeletedFile(file, prevCache));
+				// Do not await from native events: trashFile may be awaiting this callback.
+				void this.runSequenceAction(() => this.handleDeletedFile(file, prevCache));
 			})
 		);
 
@@ -104,10 +124,41 @@ export default class SequentialNoteNavigator extends Plugin {
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as SequencerSettings;
+		this.configureRelations();
 	}
 
 	async saveSettings() {
+		await this.enqueueMutation(async () => {
+			if (this.configureRelations()) {
+				this.sequenceSnapshots.clear();
+				this.pendingRelations.clear();
+				this.unseededPaths.clear();
+				for (const file of this.app.vault.getMarkdownFiles()) {
+					try { this.snapshotSequenceMetadata(file, { frontmatter: await this.readFrontmatter(file) }); }
+					catch { new Notice(`Cannot read inverse relation baseline: ${file.path}`); }
+				}
+			}
+		});
 		await this.saveData(this.settings);
+	}
+
+	private configureRelations() {
+		const text = (this.settings as SequencerSettings & { inverseRelations?: string }).inverseRelations ?? DEFAULT_INVERSE_RELATIONS;
+		const changed = text !== this.relationSetting || this.settings.reciprocalLinks !== this.reciprocalSetting;
+		try { this.relations = parseInverseRelations(text); }
+		catch (error) {
+			this.relations = parseInverseRelations(DEFAULT_INVERSE_RELATIONS);
+			new Notice(`Invalid inverse relations; using defaults. ${error instanceof Error ? error.message : String(error)}`);
+		}
+		this.relationSetting = text;
+		this.reciprocalSetting = this.settings.reciprocalLinks;
+		return changed;
+	}
+
+	private enqueueMutation<T>(action: () => Promise<T>): Promise<T> {
+		const result = this.mutationQueue.then(action);
+		this.mutationQueue = result.catch(() => {});
+		return result;
 	}
 
 	onunload() {
@@ -195,7 +246,7 @@ export default class SequentialNoteNavigator extends Plugin {
 		return null;
 	}
 
-	async readSequence(file: TFile, allowMissing = false) {
+	async readFrontmatter(file: TFile): Promise<FrontMatterCache> {
 		const content = await this.app.vault.read(file);
 		const info = getFrontMatterInfo(content);
 		if (!info.exists && /^(?:\uFEFF)?---\r?\n/.test(content)) {
@@ -205,7 +256,11 @@ export default class SequentialNoteNavigator extends Plugin {
 		if (frontmatter != null && (typeof frontmatter !== "object" || Array.isArray(frontmatter))) {
 			throw new Error(`Invalid frontmatter in ${file.path}`);
 		}
-		const fm = (frontmatter ?? {}) as FrontMatterCache;
+		return (frontmatter ?? {}) as FrontMatterCache;
+	}
+
+	async readSequence(file: TFile, allowMissing = false) {
+		const fm = await this.readFrontmatter(file);
 		return {
 			prev: this.resolveSequenceLinkFromFrontmatter(file, fm, "prev", allowMissing),
 			next: this.resolveSequenceLinkFromFrontmatter(file, fm, "next", allowMissing),
@@ -250,6 +305,10 @@ export default class SequentialNoteNavigator extends Plugin {
 	}
 
 	async insertSelectedNoteAroundCurrent(currentFile: TFile, targetFile: TFile, position: "before" | "after") {
+		return this.enqueueMutation(() => this.insertSelectedNote(currentFile, targetFile, position));
+	}
+
+	private async insertSelectedNote(currentFile: TFile, targetFile: TFile, position: "before" | "after") {
 		if (targetFile.path === currentFile.path) {
 			new Notice("Choose a different note to insert into the sequence.");
 			return;
@@ -317,8 +376,13 @@ export default class SequentialNoteNavigator extends Plugin {
 	}
 
 	async deleteSequencedFile(currentFile: TFile) {
+		return this.enqueueMutation(() => this.deleteSequencedFileNow(currentFile));
+	}
+
+	private async deleteSequencedFileNow(currentFile: TFile) {
 		const { prev: previousFile, next: nextFile } = await this.readSequence(currentFile);
 		await this.reconnectSequenceNeighbors(previousFile, nextFile);
+		await this.repairCustomDeletedRelations(currentFile, await this.readFrontmatter(currentFile));
 
 		const fileToOpen = nextFile ?? previousFile;
 		this.pluginDeletedPaths.add(currentFile.path);
@@ -337,6 +401,10 @@ export default class SequentialNoteNavigator extends Plugin {
 	}
 
 	async removeCurrentNoteFromSequence() {
+		return this.enqueueMutation(() => this.removeCurrentNoteNow());
+	}
+
+	private async removeCurrentNoteNow() {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 		const currentFile = view?.file;
 		if (!currentFile) {
@@ -357,22 +425,30 @@ export default class SequentialNoteNavigator extends Plugin {
 		new Notice(`Removed ${currentFile.basename} from the sequence.`);
 	}
 
-	async reconnectSequenceNeighbors(previousFile: TFile | null, nextFile: TFile | null) {
+	async reconnectSequenceNeighbors(previousFile: TFile | null, nextFile: TFile | null, deletedFile?: TFile) {
+		if (previousFile && previousFile.path === nextFile?.path) throw new Error('Cannot reconnect a sequence to itself.');
 		// Validate both neighbors before the first write, including ambiguous list properties.
 		if (previousFile) await this.readSequence(previousFile, true);
 		if (nextFile) await this.readSequence(nextFile, true);
 		if (previousFile) {
-			await this.updateFrontmatterLink(previousFile, "next", nextFile ? this.getYamlLink(previousFile, nextFile) : null);
+			const owns = deletedFile ? (value: unknown) => this.linkPointsTo(value, previousFile, deletedFile, true) : undefined;
+			if (!owns || owns((await this.readFrontmatter(previousFile)).next)) {
+				await this.updateFrontmatterLink(previousFile, "next", nextFile ? this.getYamlLink(previousFile, nextFile) : null, owns);
+			}
 		}
 
 		if (nextFile) {
-			await this.updateFrontmatterLink(nextFile, "prev", previousFile ? this.getYamlLink(nextFile, previousFile) : null);
+			const owns = deletedFile ? (value: unknown) => this.linkPointsTo(value, nextFile, deletedFile, true) : undefined;
+			if (!owns || owns((await this.readFrontmatter(nextFile)).prev)) {
+				await this.updateFrontmatterLink(nextFile, "prev", previousFile ? this.getYamlLink(nextFile, previousFile) : null, owns);
+			}
 		}
 	}
 
 	snapshotSequenceMetadata(file: TFile, cache: CachedMetadata) {
+		this.unseededPaths.delete(file.path);
 		const frontmatter: FrontMatterCache = {};
-		for (const key of ["prev", "next"]) {
+		for (const key of new Set(["prev", "next", ...this.relations.flatMap(pair => [pair.forward, pair.reverse])])) {
 			const value: unknown = cache.frontmatter?.[key];
 			frontmatter[key] = Array.isArray(value) ? [...(value as unknown[])] : value;
 		}
@@ -380,8 +456,14 @@ export default class SequentialNoteNavigator extends Plugin {
 	}
 
 	async handleDeletedFile(file: TFile, prevCache: CachedMetadata | null) {
+		return this.enqueueMutation(() => this.handleDeletedFileNow(file, prevCache));
+	}
+
+	private async handleDeletedFileNow(file: TFile, prevCache: CachedMetadata | null) {
 		const cache = prevCache ?? this.sequenceSnapshots.get(file.path);
 		this.sequenceSnapshots.delete(file.path);
+		this.pendingRelations.delete(file.path);
+		this.unseededPaths.delete(file.path);
 		if (this.pluginDeletedPaths.delete(file.path)) return;
 		if (!this.settings.repairSequenceOnDelete) return;
 		// Incoming links cannot reliably identify a unique chain for an unindexed note.
@@ -394,12 +476,11 @@ export default class SequentialNoteNavigator extends Plugin {
 		const previousFile = this.resolveSequenceLinkFromFrontmatter(file, frontmatter, "prev");
 		const nextFile = this.resolveSequenceLinkFromFrontmatter(file, frontmatter, "next");
 
-		if (!previousFile && !nextFile) return;
-
-		await this.reconnectSequenceNeighbors(previousFile, nextFile);
+		await this.reconnectSequenceNeighbors(previousFile, nextFile, file);
+		await this.repairCustomDeletedRelations(file, frontmatter ?? {});
 	}
 
-	resolveSequenceLinkFromFrontmatter(file: TFile, frontmatter: FrontMatterCache | undefined, key: "prev" | "next", allowMissing = false): TFile | null {
+	resolveSequenceLinkFromFrontmatter(file: TFile, frontmatter: FrontMatterCache | undefined, key: string, allowMissing = false): TFile | null {
 		const rawTarget = this.sequenceTarget(frontmatter?.[key], true);
 		if (!rawTarget) return null;
 
@@ -411,12 +492,120 @@ export default class SequentialNoteNavigator extends Plugin {
 		return this.app.vault.getFileByPath(resolved.path);
 	}
 
-	async updateFrontmatterLink(file: TFile, key: "prev" | "next", value: string | null) {
+	async updateFrontmatterLink(file: TFile, key: string, value: string | null, guard?: (value: unknown) => boolean) {
 		if (!this.app.vault.getFileByPath(file.path)) throw new Error(`Note no longer exists: ${file.path}`);
-		await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
-			this.sequenceTarget(frontmatter[key], true);
-			if (value === null) delete frontmatter[key];
-			else frontmatter[key] = value;
-		});
+		const current = await this.readFrontmatter(file);
+		// Existing unindexed notes need a baseline, not a migration of their other keys.
+		if (this.unseededPaths.has(file.path)) this.snapshotSequenceMetadata(file, { frontmatter: current });
+		const validate = (existing: unknown) => {
+			this.sequenceTarget(existing, true);
+			if (guard && !guard(existing)) throw new Error(`Inverse ownership changed: ${file.path}.${key}`);
+		};
+		validate(current[key]);
+		if (!(value === null ? current[key] === undefined : current[key] === value)) {
+			await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => {
+				validate(frontmatter[key]);
+				if (value === null) delete frontmatter[key];
+				else frontmatter[key] = value;
+			});
+		}
+		const baseline = this.sequenceSnapshots.get(file.path)?.frontmatter ?? {};
+		baseline[key] = value ?? undefined;
+		this.sequenceSnapshots.set(file.path, { frontmatter: baseline });
+	}
+
+	private async syncRelations(file: TFile) {
+		if (!this.app.vault.getFileByPath(file.path)) return;
+		const current = await this.readFrontmatter(file);
+		if (this.unseededPaths.delete(file.path)) {
+			this.snapshotSequenceMetadata(file, { frontmatter: current });
+			return;
+		}
+		const baseline = this.sequenceSnapshots.get(file.path)?.frontmatter ?? {};
+		this.pendingRelations.delete(file.path);
+		if (!this.settings.reciprocalLinks) {
+			this.snapshotSequenceMetadata(file, { frontmatter: current });
+			return;
+		}
+		for (const { forward, reverse } of this.relations) {
+			for (const [key, inverse] of [[forward, reverse], [reverse, forward]] as const) {
+				if (JSON.stringify(current[key]) === JSON.stringify(baseline[key])) continue;
+				try {
+					const before = this.sequenceTarget(baseline[key], true);
+					const after = this.sequenceTarget(current[key], true);
+					const resolve = (target: string) => this.app.metadataCache.getFirstLinkpathDest(this.cleanLinkTarget(target), file.path);
+					const oldTarget = before ? resolve(before) : null;
+					const newTarget = after ? resolve(after) : null;
+					if (after && !newTarget) {
+						new Notice(`Note not found: ${after}`);
+						// Keep this key pending for the next metadata resolve, without polling.
+						current[key] = baseline[key] as unknown;
+						this.pendingRelations.add(file.path);
+						continue;
+					}
+					if (newTarget?.path === file.path) throw new Error(`Self link in ${file.path}: ${key}`);
+					if (newTarget) {
+						const targetFM = await this.readFrontmatter(newTarget);
+						const occupied = this.sequenceTarget(targetFM[inverse], true);
+						if (occupied && this.app.metadataCache.getFirstLinkpathDest(this.cleanLinkTarget(occupied), newTarget.path)?.path !== file.path) {
+							throw new Error(`Inverse conflict: ${newTarget.path}.${inverse} is occupied`);
+						}
+					}
+					// Validate the old end before any writes, too.
+					const oldFM = oldTarget && oldTarget.path !== file.path ? await this.readFrontmatter(oldTarget) : null;
+					const oldInverse = this.sequenceTarget(oldFM?.[inverse], true);
+					if (newTarget) {
+						const fm = await this.readFrontmatter(newTarget);
+						const existing = this.sequenceTarget(fm[inverse], true);
+						if (!existing) await this.updateFrontmatterLink(newTarget, inverse, this.getYamlLink(newTarget, file), value => !this.sequenceTarget(value, true) || this.linkPointsTo(value, newTarget, file));
+					}
+					if (oldTarget && oldTarget.path !== newTarget?.path && oldInverse && this.app.metadataCache.getFirstLinkpathDest(this.cleanLinkTarget(oldInverse), oldTarget.path)?.path === file.path) {
+						await this.updateFrontmatterLink(oldTarget, inverse, null, value => this.linkPointsTo(value, oldTarget, file));
+					}
+				} catch (error) {
+					current[key] = baseline[key] as unknown;
+					new Notice(`Cannot sync ${file.path}.${key}: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			}
+		}
+		this.snapshotSequenceMetadata(file, { frontmatter: current });
+	}
+
+	private linkPointsTo(value: unknown, source: TFile, target: TFile, deleted = false): boolean {
+		const raw = this.sequenceTarget(value, true);
+		if (!raw) return false;
+		const link = this.cleanLinkTarget(raw);
+		const resolved = this.app.metadataCache.getFirstLinkpathDest(link, source.path);
+		if (resolved) return resolved.path === target.path;
+		if (!deleted) return false;
+		const normalize = (path: string) => {
+			const parts: string[] = [];
+			for (const part of path.replace(/\.md$/, '').split('/')) {
+				if (part === '..') parts.pop();
+				else if (part && part !== '.') parts.push(part);
+			}
+			return parts.join('/');
+		};
+		const relative = `${source.path.slice(0, source.path.lastIndexOf('/') + 1)}${link}`;
+		return normalize(link) === normalize(target.path) || normalize(relative) === normalize(target.path)
+			|| normalize(link) === normalize(this.cleanLinkTarget(this.getYamlLink(source, target)));
+	}
+
+	private async repairCustomDeletedRelations(file: TFile, fm: FrontMatterCache) {
+		for (const { forward, reverse } of this.relations) {
+			if (forward === 'next' && reverse === 'prev' || forward === 'prev' && reverse === 'next') continue;
+			const previous = this.resolveSequenceLinkFromFrontmatter(file, fm, reverse, true);
+			const next = this.resolveSequenceLinkFromFrontmatter(file, fm, forward, true);
+			if (previous?.path === next?.path && previous) throw new Error('Cannot repair a self-linked sequence');
+			const changes: { file: TFile; key: string; target: TFile | null }[] = [];
+			for (const [neighbor, key, target] of [[previous, forward, next], [next, reverse, previous]] as const) {
+				if (!neighbor) continue;
+				const value = this.sequenceTarget((await this.readFrontmatter(neighbor))[key], true);
+				if (this.linkPointsTo(value, neighbor, file, true)) {
+					changes.push({ file: neighbor, key, target });
+				}
+			}
+			for (const change of changes) await this.updateFrontmatterLink(change.file, change.key, change.target ? this.getYamlLink(change.file, change.target) : null, value => this.linkPointsTo(value, change.file, file, true));
+		}
 	}
 }

@@ -14,6 +14,7 @@ export class Notice { constructor(message) { notices.push(message); } }
 export class Plugin {
  constructor(app) { this.app = app; this.commands = []; }
  loadData() { return Promise.resolve({}); }
+ saveData() { return Promise.resolve(); }
  addSettingTab() {}
  registerEvent() {}
  addCommand(command) { this.commands.push(command); }

@@ -82,9 +82,24 @@ If a linked note cannot be found, Sequencer shows a notice instead of changing n
 
 ## Settings
 
-### Create Reciprocal Links
+### Automatically Sync Inverse Properties
 
-When enabled, Sequencer keeps both sides of the relationship in sync while adding links. This is the recommended setting for most sequences.
+When enabled, manual frontmatter edits synchronize the matching inverse property. For example, setting `A.next` to `[[B]]` sets `B.prev` to `[[A]]`; editing `B.prev` works in the other direction too. Removing or retargeting a link clears only its matching old reciprocal. Turning this off disables manual synchronization, not the explicit insert/remove/delete commands: those always maintain the `next`/`prev` chain.
+
+### Inverse Relations
+
+Configure one `forward: reverse` pair per nonempty line. Defaults:
+
+```text
+next: prev
+succ: pred
+```
+
+Names are case-sensitive and may contain spaces. Each property can belong to only one pair; identical keys, duplicate/overlapping pairs, dangerous object keys, and ambiguous punctuation are rejected. Invalid saved configuration falls back to the defaults with a notice. An empty configuration disables manual inverse pairs. Commands and arrow navigation still use `next` and `prev`, regardless of configured custom pairs.
+
+Only scalar strings and singleton string lists are supported; malformed or multi-target properties are rejected without guessing. Links resolve relative to the source note and can include aliases or headings. Synchronization never overwrites an occupied inverse pointing elsewhere: a conflict notice is shown before changing either target. Your manual source edit is retained, so resolve the conflict explicitly. Unrelated properties are preserved.
+
+This is **one-hop inverse synchronization**, not transitive closure or a general graph engine. Startup captures baselines without migrating existing notes. Changing the configuration resets baselines from current note contents, without rewriting the vault. Missing targets are skipped with a notice and retried when Obsidian finishes resolving metadata, without polling. Repeated or delayed metadata events use fresh note contents; command writes and synchronization are serialized to avoid treating intermediate chain states as manual edits.
 
 ### Only Show Sibling Notes
 
@@ -94,9 +109,11 @@ Turn this off if your sequences often cross folder boundaries.
 
 ### Repair Sequences When Deleting Notes
 
-When enabled, Sequencer watches for normal Obsidian file deletes. If a deleted note had `prev` or `next` sequence links, Sequencer reconnects the neighboring notes automatically.
+When enabled, Sequencer watches for normal Obsidian file deletes. If a deleted note had `prev`/`next` or configured custom inverse links, Sequencer reconnects the neighboring notes automatically. Explicit sequence deletion also repairs custom pairs. Remove/unlink commands only detach the default `next`/`prev` sequence; custom pairs have no navigation or insert commands.
 
 Repair uses Obsidian's previous metadata, falling back to lightweight sequence metadata snapshots captured at startup and refreshed on metadata changes. If a note was never indexed and neither source is available, Sequencer shows a notice instead of guessing its neighbors.
+
+Multi-file writes are not transactional: a native write or trash failure can leave earlier successful writes in place. Conflicting, malformed, or missing relationships require manual correction; the plugin does not scan incoming links to reconstruct an unknown chain.
 
 ### Confirm Sequence Note Deletion
 
