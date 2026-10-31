@@ -32,6 +32,10 @@ export class SequencerSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
+			.setName('Inverse relations')
+			.setHeading();
+
+		new Setting(containerEl)
 			.setName('Automatically sync inverse properties')
 			.setDesc('Automatically sync inverse properties when editing note properties. Sequence commands always preserve both links, even when this is off.')
 			.addToggle((toggle) =>
@@ -43,7 +47,7 @@ export class SequencerSettingTab extends PluginSettingTab {
 					})
 			);
 		new Setting(containerEl)
-			.setName('Inverse relations')
+			.setName('Property pairs')
 			.setDesc('Enter one forward: inverse pair per line, for example next: prev and succ: pred. When automatic syncing is enabled, editing either property syncs its inverse. No multi-hop relationships are inferred.')
 			.addTextArea((text) => {
 				const field = document.createElement('div');
@@ -75,6 +79,10 @@ export class SequencerSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
+		new Setting(containerEl)
+			.setName('Sequences')
+			.setHeading();
+
 		new Setting(containerEl)
 			.setName('Only show sibling notes')
 			.setDesc('Only suggest notes in the same folder when adding sequential links.')
