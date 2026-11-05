@@ -2,7 +2,7 @@
 	"id": "sequencer",
 	"name": "Sequencer",
 	"version": "0.4.0",
-	"minAppVersion": "0.15.0",
+	"minAppVersion": "1.6.6",
 	"description": "Organise and traverse through notes as a sequence using a doubly-linked list like system.",
 	"author": "alieron",
 	"authorUrl": "https://github.com/alieron",

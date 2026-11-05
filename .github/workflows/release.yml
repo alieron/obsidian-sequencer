@@ -24,7 +24,13 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Test plugin
+        run: npm test
+
+      - name: Lint plugin
+        run: npm run lint
 
       - name: Build plugin
         run: npm run build
@@ -45,5 +51,6 @@ jobs:
 
           gh release create "$tag" \
             --title="$tag" \
+            --generate-notes \
             --draft \
             main.js manifest.json styles.css

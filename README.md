@@ -156,3 +156,22 @@ prev: "[[Chapter 2]]"
 - Keep each sequence in one folder if you want the note picker to stay compact.
 - Use clear note names so the previous and next arrows are easy to follow.
 - You can edit `prev` and `next` manually if you need to repair or reshape a sequence.
+
+## Releasing
+
+Run these commands from a clean, up-to-date `master` branch after merging the changes to release:
+
+```sh
+npm ci
+npm test
+npm run lint
+npm run build
+npm version minor -m "%s"
+npm run release
+```
+
+Use `patch` instead of `minor` for a bug-fix-only release. `npm version` updates the package files, `manifest.json`, and `versions.json`, then commits and creates the version tag. `.npmrc` keeps the tag identical to the manifest version, without a `v` prefix. Update `minAppVersion` before versioning if newer Obsidian APIs are required; version 0.5.0 requires Obsidian 1.6.6 or later.
+
+Pushing the tag triggers the release workflow, which runs checks, builds the plugin, and creates a GitHub draft release containing `main.js`, `manifest.json`, and `styles.css`. Wait for the workflow to succeed, review the release notes and assets, then publish the draft from the repository's Releases page. For a plugin already listed in Obsidian's community directory, no new store submission is needed for each update.
+
+For a first-time listing, sign in at [community.obsidian.md](https://community.obsidian.md), link your GitHub account, and use **Plugins → New plugin** to submit `https://github.com/alieron/obsidian-sequencer`. The directory reads `manifest.json` from the default branch and requires the matching published GitHub release.
